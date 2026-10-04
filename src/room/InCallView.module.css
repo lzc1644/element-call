@@ -20,9 +20,13 @@ Please see LICENSE in the repository root for full details.
 /* Normally the footer uses a transparent background to allow our expressive
 page gradients to shine through. However, we sometimes need to visually separate
 it from the content underneath. If the call layout is overflowing, or if the
-spotlight tile is maximised and displaying video, apply a gradient background. */
-.overflowing > .footer,
-.inRoom:has(
+spotlight tile is maximised and displaying video, apply a gradient background.
+Keep the expanded picture unobscured when members are explicitly hidden. */
+.inRoom:not(
+    [data-layout="spotlight-expanded"][data-members-hidden="true"]
+  ).overflowing
+  > .footer,
+.inRoom:not([data-layout="spotlight-expanded"][data-members-hidden="true"]):has(
     .fixedGrid
       > .tile[data-maximised="true"]
       .spotlightItem[data-background="transparent"][data-video-enabled="true"][aria-hidden="false"]

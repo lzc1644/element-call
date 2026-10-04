@@ -13,6 +13,7 @@ import { BehaviorSubject } from "rxjs";
 import { Button } from "@vector-im/compound-web";
 
 import styles from "./InCallView.module.css";
+import { CallFooter, type FooterSnapshot } from "../components/CallFooter";
 import { Grid, type TileProps } from "../grid/Grid";
 import { makeSpotlightExpandedLayout } from "../grid/SpotlightExpandedLayout";
 import { RootElementProvider } from "../RootElementContext";
@@ -37,14 +38,52 @@ const layers = makeSpotlightExpandedLayout({
 
 function MemberVisibilityStory({
   initiallyHidden,
+  toolbarVisible = true,
+  overflowing = false,
 }: {
   initiallyHidden: boolean;
+  toolbarVisible?: boolean;
+  overflowing?: boolean;
 }): ReactNode {
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
   const [model, setModel] = useState<SpotlightExpandedLayout | null>(null);
   const [hidden, setHidden] = useState(initiallyHidden);
   const vm = useStaticViewModel({ membersHidden: hidden });
   const membersHidden = useBehavior(vm.membersHidden$);
+  const footerVm = useStaticViewModel<FooterSnapshot>({
+    asOverlay: true,
+    showFooter: toolbarVisible,
+    hideControls: false,
+    showModals: true,
+    buttonSize: "lg",
+    audioEnabled: false,
+    videoEnabled: false,
+    audioBusy: false,
+    videoBusy: false,
+    videoBlurEnabled: false,
+    toggleAudio: undefined,
+    toggleVideo: undefined,
+    toggleBlur: undefined,
+    toggleScreenSharing: undefined,
+    openSettings: undefined,
+    hangup: undefined,
+    terminateCall: undefined,
+    notifyControlInteraction: undefined,
+    layoutSwitchVm: null,
+    sharingScreen: false,
+    audioOutputSwitcher: undefined,
+    reactionIdentifier: undefined,
+    reactionData: undefined,
+    participantCount: 2,
+    debugTileLayout: false,
+    tileStoreGeneration: undefined,
+    audioOptions: [],
+    videoOptions: [],
+    selectedAudio: undefined,
+    selectedVideo: undefined,
+    selectAudioButtonOption: undefined,
+    selectVideoButtonOption: undefined,
+  });
 
   useEffect(() => {
     const scope = new ObservableScope();
@@ -77,38 +116,41 @@ function MemberVisibilityStory({
   }, []);
 
   return (
-    <div
-      ref={setRoot}
-      data-element-call-root
-      data-layout="spotlight-expanded"
-      data-members-hidden={membersHidden}
-      className={`${styles.inRoom} cpd-theme-dark`}
-      style={{ height: 500, container: "element-call / size" }}
-    >
-      <RootElementProvider value={root}>
-        <div className={styles.media}>
-          {model && (
-            <>
-              <Grid
-                className={styles.fixedGrid}
-                model={model}
-                Layout={layers.fixed}
-                Tile={PreviewTile}
-              />
-              <Grid
-                className={styles.scrollingGrid}
-                model={model}
-                Layout={layers.scrolling}
-                Tile={PreviewTile}
-              />
-            </>
-          )}
-        </div>
-        <Button kind="secondary" onClick={() => setHidden(!hidden)}>
-          {membersHidden ? "Show members" : "Hide members"}
-        </Button>
-      </RootElementProvider>
-    </div>
+    <>
+      <Button kind="secondary" onClick={() => setHidden(!hidden)}>
+        {membersHidden ? "Show members" : "Hide members"}
+      </Button>
+      <div
+        ref={setRoot}
+        data-element-call-root
+        data-layout="spotlight-expanded"
+        data-members-hidden={membersHidden}
+        className={`${styles.inRoom} ${overflowing ? styles.overflowing : ""} cpd-theme-dark`}
+        style={{ height: 500, container: "element-call / size" }}
+      >
+        <RootElementProvider value={root}>
+          <div className={styles.media}>
+            {model && (
+              <>
+                <Grid
+                  className={styles.fixedGrid}
+                  model={model}
+                  Layout={layers.fixed}
+                  Tile={PreviewTile}
+                />
+                <Grid
+                  className={styles.scrollingGrid}
+                  model={model}
+                  Layout={layers.scrolling}
+                  Tile={PreviewTile}
+                />
+              </>
+            )}
+          </div>
+          <CallFooter className={styles.footer} vm={footerVm} />
+        </RootElementProvider>
+      </div>
+    </>
   );
 }
 
@@ -137,9 +179,14 @@ function PreviewTile({
       ref={ref}
       className={`${className} ${styles.tile}`}
       style={style}
+      data-maximised={!camera}
     >
       <video
         ref={videoRef}
+        className={camera ? undefined : styles.spotlightItem}
+        data-background="transparent"
+        data-video-enabled="true"
+        aria-hidden="false"
         data-testid={camera ? "camera-preview" : "shared-screen"}
         autoPlay
         muted
@@ -181,6 +228,10 @@ export const MembersVisible: Story = {
         (camera as HTMLVideoElement).readyState,
       ).toBeGreaterThanOrEqual(2);
     });
+    const footer = canvas.getByTestId("footer-container");
+    await expect(getComputedStyle(footer).backgroundImage).toContain(
+      "linear-gradient",
+    );
     const stream = (main as HTMLVideoElement).srcObject;
     const cameraStream = (camera as HTMLVideoElement).srcObject;
     for (let cycle = 0; cycle < 2; cycle++) {
@@ -189,6 +240,7 @@ export const MembersVisible: Story = {
       );
       await expect(camera).not.toBeVisible();
       await expect(main).toBeVisible();
+      await expect(getComputedStyle(footer).backgroundImage).toBe("none");
       await expect(
         canvas.queryByRole("button", { name: "Camera options" }),
       ).not.toBeInTheDocument();
@@ -199,6 +251,9 @@ export const MembersVisible: Story = {
         canvas.getByRole("button", { name: "Show members" }),
       );
       await expect(camera).toBeVisible();
+      await expect(getComputedStyle(footer).backgroundImage).toContain(
+        "linear-gradient",
+      );
     }
   },
 };
@@ -213,6 +268,8 @@ export const MembersHidden: Story = {
       await expect(main).toBeVisible();
     });
     await expect(camera).not.toBeVisible();
+    const footer = canvas.getByTestId("footer-container");
+    await expect(getComputedStyle(footer).backgroundImage).toBe("none");
     await userEvent.click(canvas.getByRole("button", { name: "Show members" }));
     await expect(camera).toBeVisible();
   },
@@ -221,4 +278,14 @@ export const MembersHidden: Story = {
 export const PortraitMembersHidden: Story = {
   ...MembersHidden,
   globals: { viewport: { value: "mobile2", isRotated: false } },
+};
+
+export const MembersAndToolbarHidden: Story = {
+  ...MembersHidden,
+  args: { initiallyHidden: true, toolbarVisible: false },
+};
+
+export const OverflowingMembersHidden: Story = {
+  ...MembersHidden,
+  args: { initiallyHidden: true, overflowing: true },
 };

@@ -109,6 +109,10 @@ widgetTest("Sharing screen in group call", async ({ addUser, browserName }) => {
     for (let cycle = 0; cycle < 2; cycle++) {
       await frame.getByRole("button", { name: "Expand", exact: true }).click();
       await expect(call).toHaveAttribute("data-members-hidden", "true");
+      await expect(frame.getByTestId("footer-container")).toHaveCSS(
+        "background-image",
+        "none",
+      );
       await expect(
         frame.getByTestId("videoTile").filter({ visible: true }),
       ).toHaveCount(1);
