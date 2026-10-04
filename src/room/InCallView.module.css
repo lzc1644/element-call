@@ -1,5 +1,6 @@
 /*
 Copyright 2021-2024 New Vector Ltd.
+Copyright 2026 Element Creations Ltd.
 
 SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
@@ -112,6 +113,12 @@ spotlight tile is maximised and displaying video, apply a gradient background. *
 
 .inRoom[data-layout="spotlight-portrait"] .scrollingGrid {
   inset-block-start: calc(var(--call-spotlight-height) + var(--cpd-space-8x));
+}
+
+/* Keep video elements attached so hiding members does not rebuild media. */
+.inRoom[data-layout="spotlight-expanded"][data-members-hidden="true"]
+  .scrollingGrid {
+  visibility: hidden;
 }
 
 .fixedGrid,

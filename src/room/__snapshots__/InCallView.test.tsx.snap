@@ -5,6 +5,7 @@ exports[`InCallView > rendering > renders 1`] = `
   <div
     class="_inRoom_4e7ff8"
     data-layout="one-on-one-desktop"
+    data-members-hidden="false"
   >
     <header
       class="_header_e4b327 _header_4e7ff8"
@@ -115,31 +116,38 @@ exports[`InCallView > rendering > renders 1`] = `
       </button>
     </div>
     <div
-      class="_scrollingGrid_4e7ff8 _grid_b0d1cd"
+      class="_media_4e7ff8"
+      style="--call-footer-height: 0px; --call-spotlight-height: NaNpx;"
     >
       <div
-        class="_layer_185815"
-        style="width: 100%; height: 100%; overflow: hidden;"
+        class="_scrollingGrid_4e7ff8 _grid_b0d1cd"
+        data-scrollable="false"
       >
         <div
-          class="_container_185815 _slot_b0d1cd"
-          data-id="1"
-          style="max-width: 100%; max-height: 100%;"
+          class="_layer_185815"
+          style="width: 100%; height: 100%; overflow: hidden;"
         >
           <div
-            class="_slot_185815 _local_185815 _slot_b0d1cd"
-            data-block-alignment="start"
-            data-id="0"
-            data-inline-alignment="end"
-          />
+            class="_container_185815 _slot_b0d1cd"
+            data-id="1"
+            style="max-width: 100%; max-height: 100%;"
+          >
+            <div
+              class="_slot_185815 _local_185815 _slot_b0d1cd"
+              data-block-alignment="start"
+              data-id="0"
+              data-inline-alignment="end"
+            />
+          </div>
         </div>
       </div>
-    </div>
-    <div
-      class="_fixedGrid_4e7ff8 _grid_b0d1cd"
-      style="inset-block-start: NaNpx;"
-    >
-      <div />
+      <div
+        class="_fixedGrid_4e7ff8 _grid_b0d1cd"
+        data-scrollable="false"
+        style="inset-block-start: 0; height: 100%;"
+      >
+        <div />
+      </div>
     </div>
     <div
       class="_bg_2f5303 _animate_2f5303"

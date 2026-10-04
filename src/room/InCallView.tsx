@@ -1,5 +1,6 @@
 /*
 Copyright 2022-2024 New Vector Ltd.
+Copyright 2026 Element Creations Ltd.
 
 SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
@@ -326,6 +327,7 @@ export const InCallView: FC<InCallViewProps> = ({
   const reconnecting = useBehavior(vm.reconnecting$);
   const screenShareError = useBehavior(vm.screenShareError$);
   const layout = useBehavior(vm.layout$);
+  const membersHidden = useBehavior(vm.spotlightExpanded$);
   const edgeToEdge = useBehavior(vm.edgeToEdge$);
   const overflowing = useBehavior(vm.overflowing$);
   const showNameTags = useBehavior(vm.showNameTags$);
@@ -718,6 +720,7 @@ export const InCallView: FC<InCallViewProps> = ({
       // Which layout the call has settled on, for tests and for anyone
       // wondering why the call looks the way it does at the size it was given
       data-layout={layout.type}
+      data-members-hidden={membersHidden}
       onPointerUp={onViewPointerUp}
       onPointerMove={onPointerMove}
       onPointerLeave={onPointerLeave}
