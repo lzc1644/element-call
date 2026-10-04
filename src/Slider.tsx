@@ -79,7 +79,7 @@ export const Slider: FC<Props> = ({
       {/* Note: This is expected not to be visible on mobile.*/}
       <Tooltip
         placement="top"
-        label={
+        description={
           tooltipFormatter
             ? tooltipFormatter(value)
             : Math.round(value * 100).toString() + "%"

@@ -587,6 +587,41 @@ describe.each(modes)("CallViewModel (%s mode)", (mode) => {
     });
   });
 
+  test("portrait shared-screen layout can hide and restore members without losing spotlight or PiP", () => {
+    withTestScheduler(({ schedule, expectObservable }) => {
+      withCallViewModel(
+        {
+          remoteParticipants$: constant([aliceParticipant, bobParticipant]),
+          rtcMembers$: constant([localRtcMember, aliceRtcMember, bobRtcMember]),
+          sharingScreen: new Map([[aliceParticipant, constant(true)]]),
+          windowSize$: constant({ width: 380, height: 700 }),
+        },
+        (vm) => {
+          const initial = vm.layout$.value;
+          expect(initial.type).toBe("spotlight-portrait");
+          schedule("-e-e", {
+            e: () => {
+              vm.toggleSpotlightExpanded$.value!();
+              const layout = vm.layout$.value;
+              if (layout.type === "spotlight-expanded")
+                expect(layout.pip).toBeDefined();
+              if ("spotlight" in initial && "spotlight" in layout)
+                expect(layout.spotlight).toBe(initial.spotlight);
+            },
+          });
+          expectObservable(vm.layout$.pipe(map((l) => l.type))).toBe("ab-a", {
+            a: "spotlight-portrait",
+            b: "spotlight-expanded",
+          });
+          expectObservable(vm.spotlightExpanded$).toBe("ft-f", {
+            f: false,
+            t: true,
+          });
+        },
+      );
+    });
+  });
+
   test("landscape mobile layouts show screen shares and group call participants", () => {
     withTestScheduler(({ behavior, expectObservable }) => {
       // Starts as a one-on-one call, then Alice shares her screen, then Bob
@@ -1035,7 +1070,9 @@ describe.each(modes)("CallViewModel (%s mode)", (mode) => {
 
   test("footer auto-hides after three seconds on Firefox desktop", () => {
     getIsFirefox.mockReturnValue(true);
-    onTestFinished(() => getIsFirefox.mockReturnValue(false));
+    onTestFinished(() => {
+      getIsFirefox.mockReturnValue(false);
+    });
 
     withTestScheduler(({ expectObservable }) => {
       withCallViewModel(

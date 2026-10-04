@@ -12,7 +12,7 @@ import { testScope, mockMuteStates, mockMediaDevices } from "../utils/test";
 import { constant } from "../state/Behavior";
 import type { CallViewModel } from "../state/CallViewModel/CallViewModel";
 import type { Alignment, Layout } from "../state/layout-types";
-import type { SpotlightTileViewModel } from "../state/TileViewModel";
+import { type SpotlightTileViewModel } from "../state/TileViewModel";
 import type { DeviceLabel } from "../state/MediaDevices";
 import { createCallFooterViewModel } from "./CallFooterViewModel";
 import { HeaderStyle } from "../UrlParams";
@@ -38,6 +38,8 @@ vi.mock("@livekit/track-processors", () => ({
 function buildMinimalCallViewModel(layout: Layout): CallViewModel {
   return {
     layout$: constant(layout),
+    spotlightExpanded$: constant(false),
+    toggleSpotlightExpanded$: constant(null),
     edgeToEdge$: constant(false),
     showHeader$: constant(false),
     hangup: (): void => {},

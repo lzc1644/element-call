@@ -144,9 +144,12 @@ function getLayoutLayers(callView: Locator): {
   fixedGrid: Locator;
   scrollingGrid: Locator;
 } {
-  const fixedGrid = callView.locator(':scope > div:has([data-id="spotlight"])');
+  // The media container owns both layers; the footer is its sibling.
+  const fixedGrid = callView.locator(
+    ':scope > div > div:has([data-id="spotlight"])',
+  );
   const scrollingGrid = callView.locator(
-    ':scope > div:has([data-testid="videoTile"]):not(:has([data-id="spotlight"]))',
+    ':scope > div > div:has([data-testid="videoTile"]):not(:has([data-id="spotlight"]))',
   );
 
   return { fixedGrid, scrollingGrid };

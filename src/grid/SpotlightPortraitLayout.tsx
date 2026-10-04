@@ -7,13 +7,11 @@ Please see LICENSE in the repository root for full details.
 
 import { type ReactNode, type CSSProperties } from "react";
 import { useObservableEagerState } from "observable-hooks";
-import classNames from "classnames";
 
 import { type CallLayout, arrangeTiles } from "./CallLayout";
 import { type SpotlightPortraitLayout as SpotlightPortraitLayoutModel } from "../state/layout-types.ts";
 import styles from "./SpotlightPortraitLayout.module.css";
 import { useUpdateLayout, useVisibleTiles } from "./Grid";
-import { useBehavior } from "../useBehavior";
 
 interface GridCSSProperties extends CSSProperties {
   "--grid-gap": string;
@@ -37,6 +35,7 @@ export const makeSpotlightPortraitLayout: CallLayout<
     Slot,
   }): ReactNode {
     useUpdateLayout();
+    useObservableEagerState(minBounds$);
 
     return (
       <div ref={ref} className={styles.layer}>
@@ -58,20 +57,18 @@ export const makeSpotlightPortraitLayout: CallLayout<
   }): ReactNode {
     useUpdateLayout();
     useVisibleTiles(model.setVisibleTiles);
-    const { width } = useObservableEagerState(minBounds$);
+    const { width, height } = useObservableEagerState(minBounds$);
+    const spotlightHeight = Math.min(width * (9 / 16), height * 0.45);
     const { gap, tileWidth, tileHeight } = arrangeTiles(
       width,
-      // TODO: We pretend that the minimum height is the width, because the
-      // actual minimum height is difficult to calculate
-      width,
+      height - spotlightHeight - 32,
       model.grid.length,
     );
-    const withIndicators = useBehavior(model.spotlight.media$).length > 1;
 
     return (
       <div
         ref={ref}
-        className={styles.layer}
+        className={styles.grid}
         style={
           {
             "--grid-gap": `${gap}px`,
@@ -80,16 +77,9 @@ export const makeSpotlightPortraitLayout: CallLayout<
           } as GridCSSProperties
         }
       >
-        <div
-          className={classNames(styles.spotlight, {
-            [styles.withIndicators]: withIndicators,
-          })}
-        />
-        <div className={styles.grid}>
-          {model.grid.map((m) => (
-            <Slot key={m.id} className={styles.slot} id={m.id} model={m} />
-          ))}
-        </div>
+        {model.grid.map((m) => (
+          <Slot key={m.id} className={styles.slot} id={m.id} model={m} />
+        ))}
       </div>
     );
   },
