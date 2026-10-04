@@ -7,7 +7,7 @@ Please see LICENSE in the repository root for full details.
 
 import { expect, fn, userEvent, within } from "storybook/test";
 import { BehaviorSubject } from "rxjs";
-import { type JSX, type ReactNode } from "react";
+import { type JSX, type ReactNode, useState } from "react";
 import { Link } from "@vector-im/compound-web";
 
 import type { Meta, StoryObj } from "@storybook/react-vite";
@@ -21,6 +21,7 @@ import { MediaDevices } from "../state/MediaDevices";
 import { globalScope } from "../state/ObservableScope";
 import { constant } from "../state/Behavior";
 import { type LayoutMode } from "../state/LayoutSwitchViewModel";
+import { RootElementProvider } from "../RootElementContext";
 
 // consts for tests
 const reactionIdentifier = "@user:example.com:DEVICE";
@@ -48,29 +49,40 @@ function CallFooterStoryWrapper({
   layout,
   setLayout,
   theme,
+  height = 600,
   ...vmSnapshot
 }: Omit<FooterSnapshot, "layoutSwitchVm"> & {
   children?: false | JSX.Element | JSX.Element[] | undefined;
   layout: LayoutMode | null;
   setLayout: (value: LayoutMode) => void;
   theme: "light" | "dark";
+  height?: number;
 }): ReactNode {
+  const [root, setRoot] = useState<HTMLDivElement | null>(null);
   const vm = useStaticViewModel({
     ...vmSnapshot,
     layoutSwitchVm: layout && { layout$: constant(layout), setLayout },
   });
   return (
     <MediaDevicesContext value={mediaDevices}>
-      <div className={`${inCallViewStyles.inRoom} cpd-theme-${theme}`}>
-        <ReactionsSenderContext
-          value={{
-            supportsReactions: false,
-            toggleRaisedHand: async () => Promise.resolve(),
-            sendReaction: async (reaction: ReactionOption) => Promise.resolve(),
-          }}
-        >
-          <CallFooter vm={vm} />
-        </ReactionsSenderContext>
+      <div
+        ref={setRoot}
+        data-element-call-root
+        style={{ height }}
+        className={`${inCallViewStyles.inRoom} cpd-theme-${theme}`}
+      >
+        <RootElementProvider value={root}>
+          <ReactionsSenderContext
+            value={{
+              supportsReactions: false,
+              toggleRaisedHand: async () => Promise.resolve(),
+              sendReaction: async (reaction: ReactionOption) =>
+                Promise.resolve(),
+            }}
+          >
+            <CallFooter vm={vm} />
+          </ReactionsSenderContext>
+        </RootElementProvider>
       </div>
     </MediaDevicesContext>
   );
@@ -202,6 +214,7 @@ export const AudioVideoEnabled: Story = {
     ...Default.args,
     audioEnabled: true,
     videoEnabled: true,
+    terminateCall: undefined,
   },
   play: async ({ args, canvasElement }) => {
     const canvas = within(canvasElement);
@@ -279,6 +292,7 @@ export const Pip: Story = {
     ...Default.args,
     buttonSize: "md",
     layout: null,
+    terminateCall: undefined,
   },
   play: async ({ args, canvasElement }) => {
     const canvas = within(canvasElement);

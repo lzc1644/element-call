@@ -40,6 +40,8 @@ Please see LICENSE in the repository root for full details.
   /* 将收起动画限制在工具栏区域内，避免它扩大通话页面滚动范围。 */
   overflow: clip;
   pointer-events: none;
+  padding-block: var(--cpd-space-4x)
+    calc(env(safe-area-inset-bottom) + var(--cpd-space-4x));
 }
 
 .footer.overlay .toolbar {
@@ -156,7 +158,8 @@ Once we exceed 500 we hide everything except the buttons.
 */
 @container element-call (max-width: 500px) {
   .toolbar {
-    grid-template-areas: "buttons buttons buttons";
+    grid-template-columns: auto;
+    grid-template-areas: "buttons";
   }
 
   .footer.overlay {
@@ -165,7 +168,6 @@ Once we exceed 500 we hide everything except the buttons.
   }
 
   .footer.overlay .toolbar {
-    /* overlay 规则的优先级更高，需要在这里明确覆盖窄屏网格。 */
     grid-template-columns: auto;
     grid-template-areas: "buttons";
     padding-inline: var(--cpd-space-2x);
@@ -202,9 +204,10 @@ Once we exceed 500 we hide everything except the buttons.
 }
 
 @container element-call (max-height: 400px) {
-  .footer {
-    padding-block: var(--cpd-space-4x)
-      calc(env(safe-area-inset-bottom) + var(--cpd-space-4x));
+  .footer,
+  .footer.overlay {
+    padding-block: var(--cpd-space-2x)
+      calc(env(safe-area-inset-bottom) + var(--cpd-space-2x));
   }
 }
 

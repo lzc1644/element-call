@@ -9,6 +9,7 @@ import { BehaviorSubject } from "rxjs";
 import { logger } from "matrix-js-sdk/lib/logger";
 
 import { GridTileViewModel, SpotlightTileViewModel } from "./TileViewModel";
+import { ObservableScope } from "./ObservableScope";
 import { fillGaps } from "../utils/iter";
 import { debugTileLayout } from "../settings/settings";
 import { type MediaViewModel } from "./media/MediaViewModel";
@@ -25,6 +26,7 @@ let DEBUG_ENABLED = false;
 debugTileLayout.value$.subscribe((value) => (DEBUG_ENABLED = value));
 
 class SpotlightTileData {
+  private readonly scope = new ObservableScope();
   private readonly media$: BehaviorSubject<MediaViewModel[]>;
   public get media(): MediaViewModel[] {
     return this.media$.value;
@@ -52,6 +54,7 @@ class SpotlightTileData {
   public readonly vm: SpotlightTileViewModel;
 
   public constructor(
+    scope: ObservableScope,
     media: MediaViewModel[],
     maximised: boolean,
     background: SpotlightBackground,
@@ -59,11 +62,18 @@ class SpotlightTileData {
     this.media$ = new BehaviorSubject(media);
     this.maximised$ = new BehaviorSubject(maximised);
     this.background$ = new BehaviorSubject(background);
+    const tileScope = this.scope;
+    scope.onEnd(() => tileScope.end());
     this.vm = new SpotlightTileViewModel(
+      tileScope,
       this.media$,
       this.maximised$,
       this.background$,
     );
+  }
+
+  public destroy(): void {
+    this.scope.end();
   }
 }
 
@@ -91,6 +101,7 @@ class GridTileData {
  */
 export class TileStore {
   private constructor(
+    private readonly scope: ObservableScope,
     private readonly spotlight: SpotlightTileData | null,
     private readonly grid: GridTileData[],
     /**
@@ -108,8 +119,8 @@ export class TileStore {
   /**
    * Creates an an empty collection of tiles.
    */
-  public static empty(): TileStore {
-    return new TileStore(null, [], 0);
+  public static empty(scope: ObservableScope): TileStore {
+    return new TileStore(scope, null, [], 0);
   }
 
   /**
@@ -118,9 +129,11 @@ export class TileStore {
    */
   public from(visibleTiles: number): TileStoreBuilder {
     return new TileStoreBuilder(
+      this.scope,
       this.spotlight,
       this.grid,
-      (spotlight, grid) => new TileStore(spotlight, grid, this.generation + 1),
+      (spotlight, grid) =>
+        new TileStore(this.scope, spotlight, grid, this.generation + 1),
       visibleTiles,
       this.generation,
     );
@@ -159,6 +172,7 @@ export class TileStoreBuilder {
   private readonly invisibleGridEntries: GridTileData[] = [];
 
   public constructor(
+    private readonly scope: ObservableScope,
     private readonly prevSpotlight: SpotlightTileData | null,
     private readonly prevGrid: GridTileData[],
     private readonly construct: (
@@ -192,7 +206,12 @@ export class TileStoreBuilder {
 
     // Reuse the previous spotlight tile if it exists
     if (this.prevSpotlight === null) {
-      this.spotlight = new SpotlightTileData(media, maximised, background);
+      this.spotlight = new SpotlightTileData(
+        this.scope,
+        media,
+        maximised,
+        background,
+      );
     } else {
       this.spotlight = this.prevSpotlight;
       this.spotlight.media = media;
@@ -321,6 +340,7 @@ export class TileStoreBuilder {
    * collection but not the new collection will be destroyed.
    */
   public build(): TileStore {
+    if (this.spotlight === null) this.prevSpotlight?.destroy();
     // Piece together the grid
     const grid = [
       ...fillGaps(this.stationaryGridEntries, [

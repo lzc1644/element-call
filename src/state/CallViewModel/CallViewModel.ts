@@ -1378,7 +1378,13 @@ export function createCallViewModel$(
                   ? combineLatest([grid$, spotlight$], (grid, spotlight) =>
                       grid.length > smallMobileCallThreshold ||
                       spotlight.some((vm) => vm.type === "screen share")
-                        ? spotlightPortraitLayoutMedia$
+                        ? spotlightExpanded$.pipe(
+                            switchMap((expanded) =>
+                              expanded
+                                ? spotlightExpandedLayoutMedia$(false)
+                                : spotlightPortraitLayoutMedia$,
+                            ),
+                          )
                         : gridLayoutMedia$,
                     ).pipe(switchAll())
                   : of(oneOnOne),
@@ -1465,11 +1471,12 @@ export function createCallViewModel$(
   const toggleSpotlightExpanded$ = scope.behavior<(() => void) | null>(
     windowMode$.pipe(
       switchMap((mode) =>
-        mode === "normal"
+        mode === "normal" || mode === "narrow"
           ? layoutMedia$.pipe(
               map(
                 (l) =>
                   l.type === "spotlight-landscape" ||
+                  l.type === "spotlight-portrait" ||
                   l.type === "spotlight-expanded",
               ),
             )
@@ -1562,9 +1569,7 @@ export function createCallViewModel$(
     header === HeaderStyle.None && showControls === false
   );
   const showFooter$ = scope.behavior(
-    naturallyShowFooter$.pipe(
-      map((naturallyShowFooter) => naturallyShowFooter && showFooterUrlParams),
-    ),
+    naturallyShowFooter$.pipe(map((natural) => natural && showFooterUrlParams)),
   );
 
   const showModals$ = scope.behavior(
@@ -1699,7 +1704,7 @@ export function createCallViewModel$(
 
           return { layout, overflowing, tiles: newTiles };
         },
-        { layout: null, overflowing: false, tiles: TileStore.empty() },
+        { layout: null, overflowing: false, tiles: TileStore.empty(scope) },
       ),
     ),
   );

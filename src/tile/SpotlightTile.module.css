@@ -94,6 +94,10 @@ Please see LICENSE in the repository root for full details.
   appearance: none;
   cursor: pointer;
   padding: var(--cpd-space-2x);
+  min-inline-size: 44px;
+  min-block-size: 44px;
+  display: grid;
+  place-items: center;
   border: none;
   border-radius: var(--cpd-radius-pill-effect);
   background: rgba(from var(--cpd-color-gray-100) r g b / 0.6);
@@ -102,23 +106,51 @@ Please see LICENSE in the repository root for full details.
     opacity 0.15s,
     background-color 0.1s;
   z-index: 1;
-  --inset: 6px;
-  inset-block-end: var(--inset);
-  inset-inline-end: var(--inset);
 }
 
-.bottomRightButtons {
+.controls {
   display: flex;
   gap: var(--cpd-space-2x);
   position: absolute;
-  inset-block-end: var(--cpd-space-1x);
-  inset-inline-end: var(--cpd-space-1x);
+  inset-block-start: calc(
+    var(--call-view-safe-area-inset-top, 0px) + var(--cpd-space-1x)
+  );
+  inset-inline-end: calc(env(safe-area-inset-right) + var(--cpd-space-1x));
   z-index: 1;
 }
 
+@container element-call (max-width: 500px) {
+  .controls {
+    inset-block-start: auto;
+    inset-block-end: calc(
+      var(--call-view-safe-area-inset-bottom, 0px) + var(--cpd-space-1x)
+    );
+  }
+}
+
+.volumeMenu {
+  position: absolute;
+  z-index: calc(var(--call-view-header-footer-layer, 2) + 1);
+  --volume-popup-width: min(280px, calc(100% - var(--cpd-space-8x)));
+  inline-size: var(--volume-popup-width);
+  box-sizing: border-box;
+  border-radius: var(--cpd-space-3x);
+  background: var(--cpd-color-bg-canvas-default);
+  border: var(--cpd-border-width-1) solid
+    var(--cpd-color-border-interactive-secondary);
+  box-shadow: var(--small-drop-shadow);
+  padding-block: var(--cpd-space-4x);
+}
+
 .volumeSlider {
-  width: 100%;
-  min-width: 172px;
+  inline-size: 100%;
+  min-inline-size: 0;
+  block-size: 44px;
+}
+
+/* Keep the range thin while preserving a larger touch target. */
+.volumeSlider > :first-child {
+  position: relative;
 }
 
 /* Disable the hover effect for the screen share volume menu button */
@@ -128,6 +160,9 @@ Please see LICENSE in the repository root for full details.
 }
 
 .volumeMenuItem {
+  display: flex;
+  min-inline-size: 0;
+  padding: var(--cpd-space-4x);
   gap: var(--cpd-space-3x);
 }
 
@@ -137,7 +172,10 @@ Please see LICENSE in the repository root for full details.
   border: none;
   padding: 0;
   cursor: pointer;
-  display: flex;
+  min-inline-size: 44px;
+  min-block-size: 44px;
+  display: grid;
+  place-items: center;
 }
 
 /* Make icons change color with the theme */
@@ -162,10 +200,10 @@ Please see LICENSE in the repository root for full details.
 }
 
 @media (hover) {
-  .tile button {
+  .tile .advance {
     opacity: 0;
   }
-  .tile:hover button {
+  .tile:hover .advance {
     opacity: 1;
   }
 }

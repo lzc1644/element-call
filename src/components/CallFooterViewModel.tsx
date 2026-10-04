@@ -148,7 +148,10 @@ export function createCallFooterViewModel(
   muteStates: MuteStates,
   mediaDevices: MediaDevices,
   reactionIdentifier: string | undefined,
-  options: { showControls: boolean; header: HeaderStyle },
+  options: {
+    showControls: boolean;
+    header: HeaderStyle;
+  },
 ): ViewModel<FooterSnapshot> {
   const { showControls, header: headerStyle } = options;
 

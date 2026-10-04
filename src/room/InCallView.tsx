@@ -92,11 +92,17 @@ import { type DeveloperSettingsSnapshot } from "../settings/DeveloperSettingsTab
 import { type ViewModel } from "../state/ViewModel.ts";
 import { RingingStatus } from "../tile/RingingStatus.tsx";
 import { RingingAudioRenderer } from "./RingingAudioRenderer.tsx";
+import {
+  createFullscreenViewModel,
+  type FullscreenViewModel,
+} from "../state/FullscreenViewModel";
 
 declare module "react" {
   interface CSSProperties {
     "--call-view-safe-area-inset-top"?: string;
     "--call-view-safe-area-inset-bottom"?: string;
+    "--call-footer-height"?: string;
+    "--call-spotlight-height"?: string;
   }
 }
 
@@ -193,7 +199,10 @@ export const ActiveCall: FC<ActiveCallProps> = (props) => {
       props.muteStates,
       mediaDevices,
       `${props.client.getUserId()}:${props.client.getDeviceId()}`,
-      { showControls: urlParams.showControls, header: urlParams.header },
+      {
+        showControls: urlParams.showControls,
+        header: urlParams.header,
+      },
     );
     setFooterVm(footerVm);
     setDeveloperSettingsVm(createDeveloperSettingsTabViewModel(scope, vm));
@@ -212,6 +221,7 @@ export const ActiveCall: FC<ActiveCallProps> = (props) => {
     trackProcessorState$,
     props.client,
     vm,
+    rootElement,
   ]);
 
   if (vm === null) return null;
@@ -274,12 +284,7 @@ export const InCallView: FC<InCallViewProps> = ({
   // Merge the refs so they can attach to the same element
   const containerRef = useMergedRefs(containerRef1, containerRef2);
 
-  // The fixed grid is positioned against Element Call's root, so offsets
-  // handed to it have to be measured from there rather than from the
-  // viewport. Standalone the two are the same, the root being the page; for a
-  // component the root sits wherever the host put it, and measuring from the
-  // viewport would push the grid down by that much again. Taken at the same
-  // moment as `bounds`, so that the two agree however the host has scrolled.
+  // AppBar safe-area insets are relative to this call's root, not the page.
   const rootElement = useRootElement();
   const rootTop = useMemo(
     () => rootElement.getBoundingClientRect().top,
@@ -289,6 +294,18 @@ export const InCallView: FC<InCallViewProps> = ({
   const topWithinRoot = bounds.top - rootTop;
 
   const { showControls, header: headerStyle } = useUrlParams();
+  const [fullscreenVm, setFullscreenVm] = useState<FullscreenViewModel | null>(
+    null,
+  );
+  useEffect(() => {
+    const scope = new ObservableScope();
+    setFullscreenVm(createFullscreenViewModel(scope, rootElement));
+    return (): void => scope.end();
+  }, [rootElement]);
+  const fullscreen = useBehavior(fullscreenVm?.fullscreen$ ?? constant(false));
+  const toggleFullscreen = useBehavior(
+    fullscreenVm?.toggleFullscreen$ ?? constant(undefined),
+  );
 
   const muteAllAudio = useBehavior(muteAllAudio$);
   const toggleAudio = useBehavior(muteStates.audio.toggle$);
@@ -374,17 +391,41 @@ export const InCallView: FC<InCallViewProps> = ({
 
   const [headerRef, headerBounds] = useMeasure();
   const [footerRef, footerBounds] = useMeasure();
+  const footerInset = showControls ? footerBounds.height : 0;
 
+  const hasScrollingMembers =
+    layout.type === "grid" ||
+    layout.type === "spotlight-landscape" ||
+    layout.type === "spotlight-portrait";
+  // The toolbar overlays the main picture; only scrolling members reserve it.
+  const memberFooterInset =
+    hasScrollingMembers && (layout.type !== "grid" || layout.grid.length > 1)
+      ? footerInset
+      : 0;
   const gridBounds = useMemo(
     () => ({
       width: bounds.width,
-      height: bounds.height - (edgeToEdge ? 0 : headerBounds.height),
+      height: Math.max(
+        0,
+        bounds.height - (edgeToEdge ? 0 : headerBounds.height),
+      ),
     }),
     [bounds.width, bounds.height, headerBounds.height, edgeToEdge],
   );
   const gridBoundsObservable$ = useObservable(
     (inputs$) => inputs$.pipe(map(([gridBounds]) => gridBounds)),
     [gridBounds],
+  );
+  const memberGridBounds = useMemo(
+    () => ({
+      ...gridBounds,
+      height: Math.max(0, gridBounds.height - memberFooterInset),
+    }),
+    [gridBounds, memberFooterInset],
+  );
+  const memberGridBoundsObservable$ = useObservable(
+    (inputs$) => inputs$.pipe(map(([memberBounds]) => memberBounds)),
+    [memberGridBounds],
   );
 
   useAppBarHidden(!showHeader);
@@ -530,6 +571,8 @@ export const InCallView: FC<InCallViewProps> = ({
             vm={model}
             expanded={spotlightExpanded}
             onToggleExpanded={onToggleExpanded}
+            fullscreen={fullscreen}
+            onToggleFullscreen={toggleFullscreen}
             targetWidth={targetWidth}
             targetHeight={targetHeight}
             showIndicators={showSpotlightIndicators}
@@ -542,20 +585,20 @@ export const InCallView: FC<InCallViewProps> = ({
           />
         );
       },
-    [vm, openProfile, contentObscured],
+    [vm, openProfile, contentObscured, fullscreen, toggleFullscreen],
   );
 
   const layouts = useMemo(() => {
     const inputs = { minBounds$: gridBoundsObservable$ };
     return {
-      grid: makeGridLayout(inputs),
+      grid: makeGridLayout({ minBounds$: memberGridBoundsObservable$ }),
       "spotlight-landscape": makeSpotlightLandscapeLayout(inputs),
       "spotlight-portrait": makeSpotlightPortraitLayout(inputs),
       "spotlight-expanded": makeSpotlightExpandedLayout(inputs),
       "one-on-one-desktop": makeOneOnOneDesktopLayout(inputs),
       "one-on-one-mobile": makeOneOnOneMobileLayout(inputs),
     };
-  }, [gridBoundsObservable$]);
+  }, [gridBoundsObservable$, memberGridBoundsObservable$]);
 
   const showFooter = useBehavior(footerVm.showFooter$);
   const renderContent = (): JSX.Element => {
@@ -568,6 +611,8 @@ export const InCallView: FC<InCallViewProps> = ({
           vm={layout.spotlight}
           expanded
           onToggleExpanded={null}
+          fullscreen={fullscreen}
+          onToggleFullscreen={toggleFullscreen}
           targetWidth={gridBounds.width}
           targetHeight={gridBounds.height}
           showIndicators={false}
@@ -585,9 +630,9 @@ export const InCallView: FC<InCallViewProps> = ({
         key="fixed"
         className={styles.fixedGrid}
         style={{
-          // If not edge-to-edge, consume the header insets right here.
-          insetBlockStart: edgeToEdge ? 0 : topWithinRoot + headerBounds.height,
-          height: edgeToEdge ? "100%" : gridBounds.height,
+          // Both grids are positioned inside the media area, never the page.
+          insetBlockStart: 0,
+          height: "100%",
           // If edge-to-edge, compute new safe area insets that account for the
           // header and footer, passing them down to the tiles.
           "--call-view-safe-area-inset-top":
@@ -615,6 +660,7 @@ export const InCallView: FC<InCallViewProps> = ({
     const scrollingGrid = (
       <Grid
         key="scrolling"
+        scrolling={hasScrollingMembers}
         className={styles.scrollingGrid}
         model={layout}
         Layout={layers.scrolling}
@@ -677,13 +723,12 @@ export const InCallView: FC<InCallViewProps> = ({
       onPointerLeave={onPointerLeave}
     >
       {header}
-      {headerStyle === HeaderStyle.Standard &&
-        layout.type !== "pip" && (
-          <HeaderToggleButton
-            headerPinned={headerPinned}
-            onToggle={vm.toggleHeaderPinned}
-          />
-        )}
+      {headerStyle === HeaderStyle.Standard && layout.type !== "pip" && (
+        <HeaderToggleButton
+          headerPinned={headerPinned}
+          onToggle={vm.toggleHeaderPinned}
+        />
+      )}
       {audioParticipants.map(({ livekitRoom, url, participants }) => (
         <LivekitRoomAudioRenderer
           key={url}
@@ -693,7 +738,15 @@ export const InCallView: FC<InCallViewProps> = ({
           muted={muteAllAudio}
         />
       ))}
-      {renderContent()}
+      <div
+        className={styles.media}
+        style={{
+          "--call-footer-height": `${memberFooterInset}px`,
+          "--call-spotlight-height": `${Math.min(gridBounds.width * (9 / 16), gridBounds.height * 0.45)}px`,
+        }}
+      >
+        {renderContent()}
+      </div>
       <CallEventAudioRenderer vm={vm} muted={muteAllAudio} />
       <ReactionsAudioRenderer vm={vm} muted={muteAllAudio} />
       <RingingAudioRenderer vm={ringingVm} muted={muteAllAudio} />

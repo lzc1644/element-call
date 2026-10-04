@@ -11,13 +11,9 @@ Please see LICENSE in the repository root for full details.
   flex-direction: column;
   height: 100%;
   width: 100%;
-  overflow-x: hidden;
-  overflow-y: hidden;
-}
-
-/* 只有视频瓦片超过视口时才需要纵向滚动。 */
-.inRoom.overflowing {
-  overflow-y: auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
 }
 
 /* Normally the footer uses a transparent background to allow our expressive
@@ -25,11 +21,12 @@ page gradients to shine through. However, we sometimes need to visually separate
 it from the content underneath. If the call layout is overflowing, or if the
 spotlight tile is maximised and displaying video, apply a gradient background. */
 .overflowing > .footer,
-.fixedGrid:has(
-    > .tile[data-maximised="true"]
+.inRoom:has(
+    .fixedGrid
+      > .tile[data-maximised="true"]
       .spotlightItem[data-background="transparent"][data-video-enabled="true"][aria-hidden="false"]
   )
-  ~ .footer {
+  > .footer {
   background: linear-gradient(
     180deg,
     rgba(0, 0, 0, 0) 0%,
@@ -38,7 +35,7 @@ spotlight tile is maximised and displaying video, apply a gradient background. *
 }
 
 .header {
-  position: sticky;
+  position: relative;
   flex-shrink: 0;
   inset-block-start: 0;
   z-index: var(--call-view-header-footer-layer);
@@ -54,8 +51,8 @@ spotlight tile is maximised and displaying video, apply a gradient background. *
 }
 
 .header.overlay {
-  /* Note that the header is still position: sticky in this case so that certain
-    tiles can move down out of the way of the header when visible. */
+  position: absolute;
+  inset-inline: 0;
   opacity: 1;
   transition: opacity 0.15s;
 }
@@ -87,17 +84,34 @@ spotlight tile is maximised and displaying video, apply a gradient background. *
   }
 }
 
-.fixedGrid {
-  position: absolute;
-  inline-size: 100%;
-  align-self: center;
+.media {
+  position: relative;
+  flex: 1;
+  min-block-size: 0;
+  min-inline-size: 0;
+  --call-grid-gap: 20px;
+  --call-member-rail-width: 180px;
 }
 
+.fixedGrid,
 .scrollingGrid {
-  position: relative;
-  flex-grow: 1;
-  inline-size: 100%;
-  align-self: center;
+  position: absolute;
+  inset: 0;
+}
+
+.scrollingGrid[data-scrollable="true"] {
+  inset-block-end: var(--call-footer-height);
+  pointer-events: auto;
+}
+
+.inRoom[data-layout="spotlight-landscape"] .scrollingGrid {
+  inset-inline-start: calc(
+    100% - var(--call-member-rail-width) - 2 * var(--call-grid-gap)
+  );
+}
+
+.inRoom[data-layout="spotlight-portrait"] .scrollingGrid {
+  inset-block-start: calc(var(--call-spotlight-height) + var(--cpd-space-8x));
 }
 
 .fixedGrid,
