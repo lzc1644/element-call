@@ -5,8 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
 */
 
-.fixed,
-.scrolling {
+.fixed {
   block-size: 100%;
 }
 
@@ -14,8 +13,11 @@ Please see LICENSE in the repository root for full details.
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  align-content: center;
+  align-content: safe center;
   gap: var(--gap);
+  min-block-size: 100%;
+  box-sizing: border-box;
+  padding-block: var(--gap);
 }
 
 .scrolling > .slot {
