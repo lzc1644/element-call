@@ -13,7 +13,7 @@ import {
   useCallback,
   useEffect,
   useRef,
-  useState,
+  useMemo,
 } from "react";
 import {
   ExpandIcon,
@@ -26,12 +26,14 @@ import {
   VolumeOnSolidIcon,
 } from "@vector-im/compound-design-tokens/assets/web/icons";
 import { animated } from "@react-spring/web";
-import { type Observable, map } from "rxjs";
+import { Observable, filter, shareReplay, switchMap } from "rxjs";
 import { useObservableRef } from "observable-hooks";
 import { useTranslation } from "react-i18next";
 import classNames from "classnames";
 import { type TrackReferenceOrPlaceholder } from "@livekit/components-core";
-import { Menu, MenuItem, Text } from "@vector-im/compound-web";
+import { MenuItem, MenuTitle, Text } from "@vector-im/compound-web";
+import { Root, Trigger, Portal, Content, Title } from "@radix-ui/react-dialog";
+import useMeasure from "react-use-measure";
 
 import FullScreenMaximiseIcon from "../icons/FullScreenMaximise.svg?react";
 import FullScreenMinimiseIcon from "../icons/FullScreenMinimise.svg?react";
@@ -55,6 +57,8 @@ import { platform } from "../Platform";
 import { type RingingMediaViewModel } from "../state/media/RingingMediaViewModel";
 import { RingingStatus } from "./RingingStatus";
 import { useRootElement } from "../RootElementContext";
+import { useRootSizeMatches } from "../useRootSize";
+import { observeElementSize$ } from "../utils/elementSize";
 
 interface SpotlightItemBaseProps {
   ref?: Ref<HTMLDivElement>;
@@ -315,9 +319,13 @@ SpotlightItem.displayName = "SpotlightItem";
 
 interface ScreenShareVolumeButtonProps {
   vm: RemoteScreenShareViewModel;
+  focusable: boolean;
 }
 
-const ScreenShareVolumeButton: FC<ScreenShareVolumeButtonProps> = ({ vm }) => {
+const ScreenShareVolumeButton: FC<ScreenShareVolumeButtonProps> = ({
+  vm,
+  focusable,
+}) => {
   const { t } = useTranslation();
 
   const audioEnabled = useBehavior(vm.audioEnabled$);
@@ -329,7 +337,29 @@ const ScreenShareVolumeButton: FC<ScreenShareVolumeButtonProps> = ({ vm }) => {
     ? VolumeOffSolidIcon
     : VolumeOnSolidIcon;
 
-  const [volumeMenuOpen, setVolumeMenuOpen] = useState(false);
+  const [volumeMenuOpen, setVolumeMenuOpen] = useReactiveState<boolean>(
+    (open) => audioEnabled && (open ?? false),
+    [audioEnabled],
+  );
+  const rootElement = useRootElement();
+  const narrow = useRootSizeMatches(({ width }) => width <= 500);
+  const [triggerRef, triggerBounds, measureTrigger] = useMeasure({
+    scroll: true,
+  });
+  useEffect(() => {
+    if (!volumeMenuOpen) return;
+    const subscription =
+      observeElementSize$(rootElement).subscribe(measureTrigger);
+    return (): void => subscription.unsubscribe();
+  }, [volumeMenuOpen, rootElement, measureTrigger]);
+  const popupPosition = useMemo(() => {
+    const rootBounds = rootElement.getBoundingClientRect();
+    return {
+      right: `clamp(0px, ${rootBounds.right - triggerBounds.right}px, calc(100% - var(--volume-popup-width)))`,
+      top: narrow ? undefined : triggerBounds.bottom - rootBounds.top + 8,
+      bottom: narrow ? rootBounds.bottom - triggerBounds.top + 8 : undefined,
+    };
+  }, [rootElement, triggerBounds, narrow]);
   const onMuteButtonClick = useCallback(() => vm.togglePlaybackMuted(), [vm]);
   const onVolumeChange = useCallback(
     (v: number) => vm.adjustPlaybackVolume(v),
@@ -339,43 +369,67 @@ const ScreenShareVolumeButton: FC<ScreenShareVolumeButtonProps> = ({ vm }) => {
 
   return (
     audioEnabled && (
-      <Menu
+      // Compound Menu cannot portal into this root, including in fullscreen.
+      <Root
+        modal={false}
         open={volumeMenuOpen}
         onOpenChange={setVolumeMenuOpen}
-        title={t("video_tile.screen_share_volume")}
-        side="top"
-        align="end"
-        trigger={
+      >
+        <Trigger asChild>
           <button
+            ref={triggerRef}
             className={styles.expand}
             aria-label={t("video_tile.screen_share_volume")}
+            title={t("video_tile.screen_share_volume")}
+            tabIndex={focusable ? undefined : -1}
           >
             <VolumeSolidIcon aria-hidden width={20} height={20} />
           </button>
-        }
-      >
-        <MenuItem
-          as="div"
-          className={styles.volumeMenuItem}
-          onSelect={null}
-          label={null}
-          hideChevron={true}
-        >
-          <button className={styles.menuMuteButton} onClick={onMuteButtonClick}>
-            <VolumeIcon aria-hidden width={24} height={24} />
-          </button>
-          <Slider
-            className={styles.volumeSlider}
-            label={t("video_tile.volume")}
-            value={playbackVolume}
-            min={0}
-            max={1}
-            step={0.01}
-            onValueChange={onVolumeChange}
-            onValueCommit={onVolumeCommit}
-          />
-        </MenuItem>
-      </Menu>
+        </Trigger>
+        <Portal container={rootElement}>
+          <Content
+            className={styles.volumeMenu}
+            style={popupPosition}
+            aria-describedby={undefined}
+            onPointerUp={(e) => e.stopPropagation()}
+          >
+            <Title asChild>
+              <MenuTitle title={t("video_tile.screen_share_volume")} />
+            </Title>
+            <MenuItem
+              as="div"
+              role="group"
+              className={styles.volumeMenuItem}
+              onSelect={null}
+              label={null}
+              hideChevron
+            >
+              <button
+                className={styles.menuMuteButton}
+                onClick={onMuteButtonClick}
+                aria-label={
+                  playbackMuted
+                    ? t("action.unmute_shared_audio")
+                    : t("action.mute_shared_audio")
+                }
+                aria-pressed={playbackMuted}
+              >
+                <VolumeIcon aria-hidden width={24} height={24} />
+              </button>
+              <Slider
+                className={styles.volumeSlider}
+                label={t("video_tile.volume")}
+                value={playbackVolume}
+                min={0}
+                max={1}
+                step={0.01}
+                onValueChange={onVolumeChange}
+                onValueCommit={onVolumeCommit}
+              />
+            </MenuItem>
+          </Content>
+        </Portal>
+      </Root>
     )
   );
 };
@@ -385,6 +439,10 @@ interface Props {
   vm: SpotlightTileViewModel;
   expanded: boolean;
   onToggleExpanded: (() => void) | null;
+  /** Video-local controls, also available in PiP and when the toolbar is hidden. */
+  showTileControls?: boolean;
+  fullscreen?: boolean;
+  onToggleFullscreen?: () => void;
   targetWidth: number;
   targetHeight: number;
   showIndicators: boolean;
@@ -404,6 +462,9 @@ export const SpotlightTile: FC<Props> = ({
   vm,
   expanded,
   onToggleExpanded,
+  showTileControls = true,
+  fullscreen = false,
+  onToggleFullscreen,
   targetWidth,
   targetHeight,
   showIndicators,
@@ -415,47 +476,23 @@ export const SpotlightTile: FC<Props> = ({
   style,
 }) => {
   const { t } = useTranslation();
-  const rootElement = useRootElement();
   const [ourRef, root$] = useObservableRef<HTMLDivElement | null>(null);
   const ref = useMergedRefs(ourRef, theirRef);
   const maximised = useBehavior(vm.maximised$);
   const background = useBehavior(vm.background$);
   const media = useBehavior(vm.media$);
-  const [visibleId, setVisibleId] = useState<string | undefined>(media[0]?.id);
-  const activeVisibleId = media.some((item) => item.id === visibleId)
-    ? visibleId
-    : media[0]?.id;
+  const visibleMedia = useBehavior(vm.selectedMedia$);
+  const visibleId = visibleMedia?.id;
+  const latestVm = useLatest(vm);
   const latestMedia = useLatest(media);
-  const latestVisibleId = useLatest(activeVisibleId);
-  const visibleIndex = media.findIndex((vm) => vm.id === activeVisibleId);
-  const visibleMedia = media.at(visibleIndex);
-
-  // A screen share can disappear while its camera remains in the carousel.
-  // Keep the fallback synchronous for rendering and update the state used by
-  // the observer/buttons so the removed share cannot remain selected.
-  useEffect(() => {
-    if (visibleId !== activeVisibleId) setVisibleId(activeVisibleId);
-  }, [activeVisibleId, visibleId]);
+  const latestVisibleId = useLatest(visibleId);
+  const visibleIndex = media.findIndex((vm) => vm.id === visibleId);
   const canGoBack = visibleIndex > 0;
   const canGoToNext = visibleIndex !== -1 && visibleIndex < media.length - 1;
 
-  const isFullscreen = useCallback((): boolean => {
-    if (rootElement && document.fullscreenElement) return true;
-    return false;
-  }, [rootElement]);
-
-  const FullScreenIcon = isFullscreen()
+  const FullScreenIcon = fullscreen
     ? FullScreenMinimiseIcon
     : FullScreenMaximiseIcon;
-
-  const onToggleFullscreen = useCallback(() => {
-    if (!rootElement) return;
-    if (isFullscreen()) {
-      void document?.exitFullscreen();
-    } else {
-      void rootElement.requestFullscreen();
-    }
-  }, [isFullscreen, rootElement]);
 
   // To keep track of which item is visible, we need an intersection observer
   // hooked up to the root element and the items. Because the items will run
@@ -464,17 +501,27 @@ export const SpotlightTile: FC<Props> = ({
   const intersectionObserver$ = useInitial<Observable<IntersectionObserver>>(
     () =>
       root$.pipe(
-        map(
-          (r) =>
-            new IntersectionObserver(
-              (entries) => {
-                const visible = entries.find((e) => e.isIntersecting);
-                if (visible !== undefined)
-                  setVisibleId(visible.target.getAttribute("data-id")!);
-              },
-              { root: r, threshold: 0.5 },
-            ),
+        filter((root) => root !== null),
+        switchMap(
+          (root) =>
+            new Observable<IntersectionObserver>((subscriber) => {
+              const observer = new IntersectionObserver(
+                (entries) => {
+                  const visible = entries.find(
+                    (e) => e.isIntersecting && e.intersectionRatio >= 0.5,
+                  );
+                  if (visible !== undefined)
+                    latestVm.current.setVisibleMedia(
+                      visible.target.getAttribute("data-id")!,
+                    );
+                },
+                { root, threshold: 0.5 },
+              );
+              subscriber.next(observer);
+              return (): void => observer.disconnect();
+            }),
         ),
+        shareReplay({ bufferSize: 1, refCount: true }),
       ),
   );
 
@@ -545,33 +592,53 @@ export const SpotlightTile: FC<Props> = ({
         ))}
       </div>
 
-      <div className={styles.bottomRightButtons}>
-        {visibleMedia?.type === "screen share" && !visibleMedia.local && (
-          <ScreenShareVolumeButton vm={visibleMedia} />
-        )}
-        {platform === "desktop" && (
-          <button
-            className={classNames(styles.expand)}
-            aria-label={"maximise"}
-            onClick={onToggleFullscreen}
-            tabIndex={focusable ? undefined : -1}
-          >
-            <FullScreenIcon aria-hidden width={20} height={20} />
-          </button>
-        )}
-        {onToggleExpanded && (
-          <button
-            className={classNames(styles.expand)}
-            aria-label={
-              expanded ? t("video_tile.collapse") : t("video_tile.expand")
-            }
-            onClick={onToggleExpanded}
-            tabIndex={focusable ? undefined : -1}
-          >
-            <ToggleExpandIcon aria-hidden width={20} height={20} />
-          </button>
-        )}
-      </div>
+      {showTileControls && (
+        <div className={styles.controls}>
+          {visibleMedia?.type === "screen share" && !visibleMedia.local && (
+            <ScreenShareVolumeButton
+              key={visibleMedia.id}
+              vm={visibleMedia}
+              focusable={focusable}
+            />
+          )}
+          {platform === "desktop" && onToggleFullscreen && (
+            <button
+              className={classNames(styles.expand)}
+              aria-label={
+                fullscreen
+                  ? t("action.exit_fullscreen")
+                  : t("action.enter_fullscreen")
+              }
+              title={
+                fullscreen
+                  ? t("action.exit_fullscreen")
+                  : t("action.enter_fullscreen")
+              }
+              aria-pressed={fullscreen}
+              onClick={onToggleFullscreen}
+              tabIndex={focusable ? undefined : -1}
+            >
+              <FullScreenIcon aria-hidden width={20} height={20} />
+            </button>
+          )}
+          {onToggleExpanded && (
+            <button
+              className={classNames(styles.expand)}
+              aria-label={
+                expanded ? t("video_tile.collapse") : t("video_tile.expand")
+              }
+              title={
+                expanded ? t("video_tile.collapse") : t("video_tile.expand")
+              }
+              aria-pressed={expanded}
+              onClick={onToggleExpanded}
+              tabIndex={focusable ? undefined : -1}
+            >
+              <ToggleExpandIcon aria-hidden width={20} height={20} />
+            </button>
+          )}
+        </div>
+      )}
 
       {canGoToNext && (
         <button

@@ -7,11 +7,8 @@ Please see LICENSE in the repository root for full details.
 
 .layer {
   block-size: 100%;
-  display: grid;
-  --gap: 20px;
-  gap: var(--gap);
-  margin-inline: 0;
-  display: block;
+  min-block-size: 0;
+  min-inline-size: 0;
 }
 
 .spotlight {
@@ -19,12 +16,7 @@ Please see LICENSE in the repository root for full details.
   display: grid;
   place-items: center;
   inline-size: 100%;
-  aspect-ratio: 16 / 9;
-  margin-block-end: var(--cpd-space-4x);
-}
-
-.spotlight.withIndicators {
-  margin-block-end: calc(2 * var(--cpd-space-4x) + 2px);
+  block-size: var(--call-spotlight-height);
 }
 
 .spotlight > .slot {
@@ -38,7 +30,9 @@ Please see LICENSE in the repository root for full details.
   gap: var(--grid-gap);
   justify-content: center;
   align-content: start;
-  padding-inline: var(--grid-gap);
+  min-block-size: 100%;
+  box-sizing: border-box;
+  padding: var(--grid-gap);
 }
 
 .grid > .slot {

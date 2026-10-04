@@ -6,105 +6,165 @@ Please see LICENSE in the repository root for full details.
 */
 
 import { type Meta, type StoryObj } from "@storybook/react-vite";
-import { expect, userEvent, within } from "storybook/test";
-import { BehaviorSubject } from "rxjs";
+import { expect, fn, userEvent, within } from "storybook/test";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { SpotlightTile } from "./SpotlightTile";
+import styles from "./SpotlightTile.module.css";
+import { RootElementProvider } from "../RootElementContext";
+import { ObservableScope } from "../state/ObservableScope";
 import { SpotlightTileViewModel } from "../state/TileViewModel";
-import { type Behavior } from "../state/Behavior";
-import { type MediaViewModel } from "../state/media/MediaViewModel";
-import { type RemoteUserMediaViewModel } from "../state/media/RemoteUserMediaViewModel";
+import { constant } from "../state/Behavior";
+import { createVolumeControls } from "../state/VolumeControls";
 import { type RemoteScreenShareViewModel } from "../state/media/RemoteScreenShareViewModel";
 
-function behavior<T>(value: T): Behavior<T> {
-  return new BehaviorSubject(value);
+function SpotlightStory({
+  audio,
+  expanded,
+  onToggleExpanded,
+}: {
+  audio: boolean;
+  expanded: boolean;
+  onToggleExpanded: () => void;
+}): ReactNode {
+  const [root, setRoot] = useState<HTMLDivElement | null>(null);
+  const [vm, setVm] = useState<SpotlightTileViewModel | null>(null);
+  useEffect(() => {
+    const scope = new ObservableScope();
+    const media = {
+      id: "shared-screen",
+      type: "screen share",
+      local: false,
+      userId: "@alice:example.org",
+      displayName$: constant("Alice"),
+      mxcAvatarUrl$: constant(undefined),
+      video$: constant(undefined),
+      videoEnabled$: constant(true),
+      unencryptedWarning$: constant(false),
+      focusUrl$: constant(undefined),
+      audioEnabled$: constant(audio),
+      ...createVolumeControls(scope, {
+        pretendToBeDisconnected$: constant(false),
+        sink$: constant(() => {}),
+      }),
+    } as RemoteScreenShareViewModel;
+    setVm(
+      new SpotlightTileViewModel(
+        scope,
+        constant([media]),
+        constant(false),
+        constant("solid"),
+      ),
+    );
+    return (): void => scope.end();
+  }, [audio]);
+  return (
+    <div
+      ref={setRoot}
+      data-element-call-root
+      className="cpd-theme-dark"
+      style={{
+        position: "relative",
+        container: "element-call / size",
+        height: 500,
+      }}
+    >
+      <RootElementProvider value={root}>
+        {vm && (
+          <SpotlightTile
+            vm={vm}
+            expanded={expanded}
+            onToggleExpanded={onToggleExpanded}
+            onToggleFullscreen={fn()}
+            targetWidth={700}
+            targetHeight={300}
+            showIndicators={false}
+            showNameTags
+            showRingingStatus={false}
+            focusable
+            style={{ position: "relative", height: 300, margin: 20 }}
+          />
+        )}
+      </RootElementProvider>
+    </div>
+  );
 }
 
-function remoteCamera(id: string): RemoteUserMediaViewModel {
-  return {
-    id,
-    userId: "@alice:example.org",
-    type: "user",
-    local: false,
-    displayName$: behavior("Alice"),
-    mxcAvatarUrl$: behavior(undefined),
-    video$: behavior(undefined),
-    focusUrl$: behavior(undefined),
-    unencryptedWarning$: behavior(false),
-    encryptionStatus$: behavior(1),
-    waitingForMedia$: behavior(false),
-    videoEnabled$: behavior(true),
-    speaking$: behavior(false),
-    audioEnabled$: behavior(false),
-    videoOrientation$: behavior("landscape"),
-    rtcBackendIdentity: "@alice:example.org:AAAA",
-    handRaised$: behavior(null),
-    reaction$: behavior(null),
-    audioStreamStats$: behavior(undefined),
-    videoStreamStats$: behavior(undefined),
-    toggleCropVideo: () => {},
-    setVideoAspectRatio: () => {},
-  } as unknown as RemoteUserMediaViewModel;
-}
-
-function remoteScreenShare(id: string): RemoteScreenShareViewModel {
-  return {
-    id,
-    userId: "@alice:example.org",
-    type: "screen share",
-    local: false,
-    displayName$: behavior("Alice"),
-    mxcAvatarUrl$: behavior(undefined),
-    video$: behavior(undefined),
-    focusUrl$: behavior(undefined),
-    unencryptedWarning$: behavior(false),
-    encryptionStatus$: behavior(1),
-    videoEnabled$: behavior(true),
-    audioEnabled$: behavior(false),
-    playbackMuted$: behavior(false),
-    playbackVolume$: behavior(1),
-    togglePlaybackMuted: () => {},
-    adjustPlaybackVolume: () => {},
-    commitPlaybackVolume: () => {},
-  } as RemoteScreenShareViewModel;
-}
-
-const camera = remoteCamera("@alice:example.org:AAAA:0");
-const screenShare = remoteScreenShare(`${camera.id}:screen-share`);
-const media: MediaViewModel[] = [screenShare, camera];
-
-const meta: Meta<typeof SpotlightTile> = {
-  component: SpotlightTile,
+const meta = {
+  component: SpotlightStory,
   parameters: { layout: "fullscreen" },
-};
-
+  args: { audio: true, expanded: false, onToggleExpanded: fn() },
+} satisfies Meta<typeof SpotlightStory>;
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-// Presentation coverage: CallViewModel candidate construction is covered by the
-// VM tests and the widget screen-share e2e spec.
-export const CameraAndScreenShare: Story = {
-  args: {
-    vm: new SpotlightTileViewModel(
-      new BehaviorSubject(media),
-      behavior(false),
-      behavior("solid"),
-    ),
-    expanded: false,
-    onToggleExpanded: null,
-    targetWidth: 640,
-    targetHeight: 360,
-    showIndicators: true,
-    showNameTags: true,
-    showRingingStatus: true,
-    focusable: true,
+export const DesktopControls: Story = {
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement);
+    const controls = (
+      await canvas.findByRole("button", { name: "Screen share volume" })
+    ).parentElement!;
+    const tile = controls.parentElement!;
+    await expect(
+      controls.getBoundingClientRect().top - tile.getBoundingClientRect().top,
+    ).toBeLessThan(10);
+    for (const button of within(controls).getAllByRole("button")) {
+      await expect(getComputedStyle(button).opacity).toBe("1");
+      await expect(button.getBoundingClientRect().width).toBeGreaterThanOrEqual(
+        44,
+      );
+      await expect(
+        button.getBoundingClientRect().height,
+      ).toBeGreaterThanOrEqual(44);
+    }
+    await userEvent.click(canvas.getByRole("button", { name: "Expand" }));
+    await expect(args.onToggleExpanded).toHaveBeenCalled();
   },
+};
+export const NarrowControls: Story = {
+  globals: { viewport: { value: "mobile2", isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const button = await within(canvasElement).findByRole("button", {
+      name: "Screen share volume",
+    });
+    const controls = button.parentElement!,
+      tile = controls.parentElement!;
+    await expect(
+      tile.getBoundingClientRect().bottom -
+        controls.getBoundingClientRect().bottom,
+    ).toBeLessThan(10);
+  },
+};
+export const ShareWithoutAudio: Story = {
+  args: { audio: false },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    const cameraItem = canvasElement.querySelector(`[data-id="${camera.id}"]`);
-    await expect(cameraItem).toHaveAttribute("aria-hidden", "true");
-
-    await userEvent.click(canvas.getByRole("button", { name: "Next" }));
-    await expect(cameraItem).not.toHaveAttribute("aria-hidden", "true");
+    await canvas.findByRole("button", { name: "Expand" });
+    await expect(
+      canvas.queryByRole("button", { name: "Screen share volume" }),
+    ).not.toBeInTheDocument();
+  },
+};
+export const MembersHidden: Story = { args: { expanded: true } };
+export const VolumeMenu: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      await canvas.findByRole("button", { name: "Screen share volume" }),
+    );
+    const popup = canvas.getByRole("dialog", { name: "Screen share volume" });
+    await expect(popup.closest("[data-element-call-root]")).not.toBeNull();
+    const slider = within(popup).getByRole("slider", { name: "Volume" });
+    const sliderRoot = slider.closest(`.${styles.volumeSlider}`)!;
+    await expect(sliderRoot.getBoundingClientRect().width).toBeGreaterThan(100);
+    const track = sliderRoot.firstElementChild!;
+    await expect(track.firstElementChild!.getBoundingClientRect().height).toBe(
+      track.getBoundingClientRect().height,
+    );
+    slider.focus();
+    await userEvent.keyboard("{ArrowLeft}{ArrowLeft}");
+    await expect(slider).toHaveAttribute("aria-valuenow", "0.98");
+    await userEvent.keyboard("{Escape}");
+    await expect(popup).not.toBeInTheDocument();
   },
 };

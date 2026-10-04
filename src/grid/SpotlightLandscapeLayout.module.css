@@ -8,18 +8,19 @@ Please see LICENSE in the repository root for full details.
 .layer {
   block-size: 100%;
   display: grid;
-  --gap: 20px;
-  gap: var(--gap);
-  --grid-slot-width: 180px;
-  grid-template-columns: 1fr var(--grid-slot-width);
-  grid-template-rows: minmax(1fr, auto);
-  padding-inline: var(--gap);
+  gap: var(--call-grid-gap);
+  grid-template-columns: minmax(0, 1fr) var(--call-member-rail-width);
+  grid-template-rows: minmax(0, 1fr);
+  padding: var(--call-grid-gap);
+  box-sizing: border-box;
 }
 
 .spotlight {
   container: spotlight / size;
   display: grid;
   place-items: center;
+  min-block-size: 0;
+  min-inline-size: 0;
 }
 
 /* CSS makes us put a condition here, even though all we want to do is
@@ -31,15 +32,17 @@ unconditionally select the container so we can use cq units */
   }
 }
 
-.grid {
+.members {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--gap);
-  justify-content: center;
-  align-content: center;
+  flex-direction: column;
+  gap: var(--call-grid-gap);
+  min-block-size: 100%;
+  padding: var(--call-grid-gap);
+  box-sizing: border-box;
 }
 
-.grid > .slot {
-  inline-size: 180px;
-  block-size: 135px;
+.members > .slot {
+  inline-size: 100%;
+  block-size: min(135px, calc(100cqh - 2 * var(--call-grid-gap)));
+  flex-shrink: 0;
 }
