@@ -1,5 +1,6 @@
 /*
 Copyright 2024 New Vector Ltd.
+Copyright 2026 Element Creations Ltd.
 
 SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
@@ -27,6 +28,14 @@ debugTileLayout.value$.subscribe((value) => (DEBUG_ENABLED = value));
 
 class SpotlightTileData {
   private readonly scope = new ObservableScope();
+  private readonly layoutMedia$: BehaviorSubject<MediaViewModel[]>;
+  public get layoutMedia(): MediaViewModel[] {
+    return this.layoutMedia$.value;
+  }
+  public set layoutMedia(value: MediaViewModel[]) {
+    this.layoutMedia$.next(value);
+  }
+
   private readonly media$: BehaviorSubject<MediaViewModel[]>;
   public get media(): MediaViewModel[] {
     return this.media$.value;
@@ -55,6 +64,7 @@ class SpotlightTileData {
 
   public constructor(
     scope: ObservableScope,
+    layoutMedia: MediaViewModel[],
     media: MediaViewModel[],
     maximised: boolean,
     background: SpotlightBackground,
@@ -213,6 +223,7 @@ export class TileStoreBuilder {
       this.spotlight = new SpotlightTileData(
         this.scope,
         media,
+        carouselMedia,
         maximised,
         background,
       );

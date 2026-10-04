@@ -1070,7 +1070,9 @@ describe.each(modes)("CallViewModel (%s mode)", (mode) => {
 
   test("footer auto-hides after three seconds on Firefox desktop", () => {
     getIsFirefox.mockReturnValue(true);
-    onTestFinished(() => getIsFirefox.mockReturnValue(false));
+    onTestFinished(() => {
+      getIsFirefox.mockReturnValue(false);
+    });
 
     withTestScheduler(({ expectObservable }) => {
       withCallViewModel(

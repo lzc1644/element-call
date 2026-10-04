@@ -17,15 +17,18 @@ import { SpotlightTileViewModel } from "../state/TileViewModel";
 import { constant } from "../state/Behavior";
 import { createVolumeControls } from "../state/VolumeControls";
 import { type RemoteScreenShareViewModel } from "../state/media/RemoteScreenShareViewModel";
+import { type RemoteUserMediaViewModel } from "../state/media/RemoteUserMediaViewModel";
 
 function SpotlightStory({
   audio,
   expanded,
   onToggleExpanded,
+  cameraAndScreenShare,
 }: {
   audio: boolean;
   expanded: boolean;
   onToggleExpanded: () => void;
+  cameraAndScreenShare: boolean;
 }): ReactNode {
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
   const [vm, setVm] = useState<SpotlightTileViewModel | null>(null);
@@ -51,13 +54,17 @@ function SpotlightStory({
     setVm(
       new SpotlightTileViewModel(
         scope,
-        constant([media]),
+        constant(
+          cameraAndScreenShare
+            ? [media, remoteCamera("alice-camera")]
+            : [media],
+        ),
         constant(false),
         constant("solid"),
       ),
     );
     return (): void => scope.end();
-  }, [audio]);
+  }, [audio, cameraAndScreenShare]);
   return (
     <div
       ref={setRoot}
@@ -78,7 +85,7 @@ function SpotlightStory({
             onToggleFullscreen={fn()}
             targetWidth={700}
             targetHeight={300}
-            showIndicators={false}
+            showIndicators={cameraAndScreenShare}
             showNameTags
             showRingingStatus={false}
             focusable
@@ -93,7 +100,12 @@ function SpotlightStory({
 const meta = {
   component: SpotlightStory,
   parameters: { layout: "fullscreen" },
-  args: { audio: true, expanded: false, onToggleExpanded: fn() },
+  args: {
+    audio: true,
+    expanded: false,
+    onToggleExpanded: fn(),
+    cameraAndScreenShare: false,
+  },
 } satisfies Meta<typeof SpotlightStory>;
 export default meta;
 type Story = StoryObj<typeof meta>;
@@ -168,3 +180,45 @@ export const VolumeMenu: Story = {
     await expect(popup).not.toBeInTheDocument();
   },
 };
+
+// Presentation coverage: CallViewModel candidate construction is covered by the
+// VM tests and the widget screen-share e2e spec.
+export const CameraAndScreenShare: Story = {
+  args: { audio: false, cameraAndScreenShare: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await canvas.findByRole("button", { name: "Next" });
+    const cameraItem = canvasElement.querySelector('[data-id="alice-camera"]');
+    await expect(cameraItem).toHaveAttribute("aria-hidden", "true");
+
+    await userEvent.click(canvas.getByRole("button", { name: "Next" }));
+    await expect(cameraItem).not.toHaveAttribute("aria-hidden", "true");
+  },
+};
+
+function remoteCamera(id: string): RemoteUserMediaViewModel {
+  return {
+    id,
+    userId: "@alice:example.org",
+    type: "user",
+    local: false,
+    displayName$: constant("Alice"),
+    mxcAvatarUrl$: constant(undefined),
+    video$: constant(undefined),
+    focusUrl$: constant(undefined),
+    unencryptedWarning$: constant(false),
+    encryptionStatus$: constant(1),
+    waitingForMedia$: constant(false),
+    videoEnabled$: constant(true),
+    speaking$: constant(false),
+    audioEnabled$: constant(false),
+    videoOrientation$: constant("landscape"),
+    rtcBackendIdentity: "@alice:example.org:AAAA",
+    handRaised$: constant(null),
+    reaction$: constant(null),
+    audioStreamStats$: constant(undefined),
+    videoStreamStats$: constant(undefined),
+    toggleCropVideo: () => {},
+    setVideoAspectRatio: () => {},
+  } as unknown as RemoteUserMediaViewModel;
+}

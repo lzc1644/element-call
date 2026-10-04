@@ -1,5 +1,6 @@
 /*
 Copyright 2024 New Vector Ltd.
+Copyright 2026 Element Creations Ltd.
 
 SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
@@ -587,7 +588,7 @@ export const SpotlightTile: FC<Props> = ({
             // that we want to bring into view
             snap={scrollToId === null || scrollToId === vm.id}
             className={itemClassName}
-            aria-hidden={(scrollToId ?? activeVisibleId) !== vm.id}
+            aria-hidden={(scrollToId ?? visibleId) !== vm.id}
           />
         ))}
       </div>
@@ -661,7 +662,7 @@ export const SpotlightTile: FC<Props> = ({
               data-testid="screenshare-indicator"
               key={vm.id}
               className={styles.item}
-              data-visible={vm.id === activeVisibleId}
+              data-visible={vm.id === visibleId}
             />
           ))}
         </div>

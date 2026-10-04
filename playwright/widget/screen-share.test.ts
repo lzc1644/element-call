@@ -180,7 +180,8 @@ widgetTest("Sharing screen in group call", async ({ addUser, browserName }) => {
       await expect(
         frame.getByTestId("videoTile").filter({ visible: true }),
       ).toHaveCount(1);
-      await expect(frame.getByTestId("videoTile")).toHaveCount(2);
+      // The carousel retains Alice's share and camera, plus the hidden PiP.
+      await expect(frame.getByTestId("videoTile")).toHaveCount(3);
       await expect(share).toBeVisible();
 
       await frame

@@ -1,5 +1,6 @@
 /*
 Copyright 2024 New Vector Ltd.
+Copyright 2026 Element Creations Ltd.
 
 SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
@@ -121,7 +122,12 @@ test("SpotlightTile falls back to the camera when its share stops", () => {
   const { container } = render(
     <SpotlightTile
       vm={
-        new SpotlightTileViewModel(media$, constant(false), constant("solid"))
+        new SpotlightTileViewModel(
+          testScope(),
+          media$,
+          constant(false),
+          constant("solid"),
+        )
       }
       targetWidth={300}
       targetHeight={200}

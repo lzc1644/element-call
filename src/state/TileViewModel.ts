@@ -1,5 +1,6 @@
 /*
 Copyright 2024 New Vector Ltd.
+Copyright 2026 Element Creations Ltd.
 
 SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
@@ -46,6 +47,7 @@ export class SpotlightTileViewModel {
     public readonly media$: Behavior<MediaViewModel[]>,
     public readonly maximised$: Behavior<boolean>,
     public readonly background$: Behavior<"solid" | "transparent">,
+    public readonly layoutMedia$: Behavior<MediaViewModel[]> = media$,
   ) {
     media$.pipe(scope.bind()).subscribe((media) => {
       const selected =

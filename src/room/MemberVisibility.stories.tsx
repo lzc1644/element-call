@@ -56,6 +56,7 @@ function MemberVisibilityStory({
     hideControls: false,
     showModals: true,
     buttonSize: "lg",
+    showLogo: false,
     audioEnabled: false,
     videoEnabled: false,
     audioBusy: false,
