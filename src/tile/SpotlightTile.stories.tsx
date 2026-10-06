@@ -6,7 +6,7 @@ Please see LICENSE in the repository root for full details.
 */
 
 import { type Meta, type StoryObj } from "@storybook/react-vite";
-import { expect, fn, userEvent, within } from "storybook/test";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { SpotlightTile } from "./SpotlightTile";
@@ -17,54 +17,34 @@ import { SpotlightTileViewModel } from "../state/TileViewModel";
 import { constant } from "../state/Behavior";
 import { createVolumeControls } from "../state/VolumeControls";
 import { type RemoteScreenShareViewModel } from "../state/media/RemoteScreenShareViewModel";
-import { type RemoteUserMediaViewModel } from "../state/media/RemoteUserMediaViewModel";
 
 function SpotlightStory({
   audio,
   expanded,
   onToggleExpanded,
-  cameraAndScreenShare,
+  multipleScreenShares,
 }: {
   audio: boolean;
   expanded: boolean;
   onToggleExpanded: () => void;
-  cameraAndScreenShare: boolean;
+  multipleScreenShares: boolean;
 }): ReactNode {
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
   const [vm, setVm] = useState<SpotlightTileViewModel | null>(null);
   useEffect(() => {
     const scope = new ObservableScope();
-    const media = {
-      id: "shared-screen",
-      type: "screen share",
-      local: false,
-      userId: "@alice:example.org",
-      displayName$: constant("Alice"),
-      mxcAvatarUrl$: constant(undefined),
-      video$: constant(undefined),
-      videoEnabled$: constant(true),
-      unencryptedWarning$: constant(false),
-      focusUrl$: constant(undefined),
-      audioEnabled$: constant(audio),
-      ...createVolumeControls(scope, {
-        pretendToBeDisconnected$: constant(false),
-        sink$: constant(() => {}),
-      }),
-    } as RemoteScreenShareViewModel;
+    const media = [remoteShare(scope, "alice", audio)];
+    if (multipleScreenShares) media.push(remoteShare(scope, "bob", audio));
     setVm(
       new SpotlightTileViewModel(
         scope,
-        constant(
-          cameraAndScreenShare
-            ? [media, remoteCamera("alice-camera")]
-            : [media],
-        ),
+        constant(media),
         constant(false),
         constant("solid"),
       ),
     );
     return (): void => scope.end();
-  }, [audio, cameraAndScreenShare]);
+  }, [audio, multipleScreenShares]);
   return (
     <div
       ref={setRoot}
@@ -85,7 +65,7 @@ function SpotlightStory({
             onToggleFullscreen={fn()}
             targetWidth={700}
             targetHeight={300}
-            showIndicators={cameraAndScreenShare}
+            showIndicators={multipleScreenShares}
             showNameTags
             showRingingStatus={false}
             focusable
@@ -104,7 +84,7 @@ const meta = {
     audio: true,
     expanded: false,
     onToggleExpanded: fn(),
-    cameraAndScreenShare: false,
+    multipleScreenShares: false,
   },
 } satisfies Meta<typeof SpotlightStory>;
 export default meta;
@@ -183,42 +163,52 @@ export const VolumeMenu: Story = {
 
 // Presentation coverage: CallViewModel candidate construction is covered by the
 // VM tests and the widget screen-share e2e spec.
-export const CameraAndScreenShare: Story = {
-  args: { audio: false, cameraAndScreenShare: true },
+export const MultipleScreenShares: Story = {
+  args: { audio: false, multipleScreenShares: true },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await canvas.findByRole("button", { name: "Next" });
-    const cameraItem = canvasElement.querySelector('[data-id="alice-camera"]');
-    await expect(cameraItem).toHaveAttribute("aria-hidden", "true");
+    const aliceShare = canvasElement.querySelector('[data-id="alice-share"]');
+    const bobShare = canvasElement.querySelector('[data-id="bob-share"]');
+    await expect(aliceShare).toHaveAttribute("aria-hidden", "false");
+    await expect(bobShare).toHaveAttribute("aria-hidden", "true");
+    await expect(canvas.getAllByTestId("screenshare-indicator")).toHaveLength(
+      2,
+    );
 
     await userEvent.click(canvas.getByRole("button", { name: "Next" }));
-    await expect(cameraItem).not.toHaveAttribute("aria-hidden", "true");
+    await expect(bobShare).toHaveAttribute("aria-hidden", "false");
+    await expect(aliceShare).toHaveAttribute("aria-hidden", "true");
+    await waitFor(async () => {
+      await expect(canvas.queryByRole("button", { name: "Next" })).toBeNull();
+    });
+
+    await userEvent.click(canvas.getByRole("button", { name: "Back" }));
+    await expect(aliceShare).toHaveAttribute("aria-hidden", "false");
+    await expect(bobShare).toHaveAttribute("aria-hidden", "true");
   },
 };
 
-function remoteCamera(id: string): RemoteUserMediaViewModel {
+function remoteShare(
+  scope: ObservableScope,
+  name: string,
+  audio: boolean,
+): RemoteScreenShareViewModel {
   return {
-    id,
-    userId: "@alice:example.org",
-    type: "user",
+    id: `${name}-share`,
+    type: "screen share",
     local: false,
-    displayName$: constant("Alice"),
+    userId: `@${name}:example.org`,
+    displayName$: constant(name),
     mxcAvatarUrl$: constant(undefined),
     video$: constant(undefined),
-    focusUrl$: constant(undefined),
-    unencryptedWarning$: constant(false),
-    encryptionStatus$: constant(1),
-    waitingForMedia$: constant(false),
     videoEnabled$: constant(true),
-    speaking$: constant(false),
-    audioEnabled$: constant(false),
-    videoOrientation$: constant("landscape"),
-    rtcBackendIdentity: "@alice:example.org:AAAA",
-    handRaised$: constant(null),
-    reaction$: constant(null),
-    audioStreamStats$: constant(undefined),
-    videoStreamStats$: constant(undefined),
-    toggleCropVideo: () => {},
-    setVideoAspectRatio: () => {},
-  } as unknown as RemoteUserMediaViewModel;
+    unencryptedWarning$: constant(false),
+    focusUrl$: constant(undefined),
+    audioEnabled$: constant(audio),
+    ...createVolumeControls(scope, {
+      pretendToBeDisconnected$: constant(false),
+      sink$: constant(() => {}),
+    }),
+  } as RemoteScreenShareViewModel;
 }

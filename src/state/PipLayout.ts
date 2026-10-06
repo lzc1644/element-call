@@ -22,7 +22,6 @@ export function pipLayout(
     media.spotlight,
     platform === "desktop" ? false : true,
     "transparent",
-    media.spotlightMedia,
   );
   const tiles = update.build();
   return [
