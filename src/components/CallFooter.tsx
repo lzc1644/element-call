@@ -329,6 +329,7 @@ export const CallFooter: FC<FooterProps> = ({
     <div
       ref={ref}
       data-testid="footer-container"
+      data-controls-visible={showFooter && !hideControls}
       className={classNames(className, styles.footer, {
         [styles.overlay]: asOverlay,
         [styles.hidden]: !showFooter,

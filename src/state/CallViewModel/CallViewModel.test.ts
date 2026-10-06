@@ -213,7 +213,7 @@ function summarizeLayout$(l$: Observable<Layout>): Observable<LayoutSummary> {
         case "grid":
           return combineLatest(
             [
-              l.spotlight?.layoutMedia$ ?? constant(undefined),
+              l.spotlight?.media$ ?? constant(undefined),
               ...l.grid.map((vm) => vm.media$),
             ],
             (spotlight, ...grid) => ({
@@ -225,7 +225,7 @@ function summarizeLayout$(l$: Observable<Layout>): Observable<LayoutSummary> {
         case "spotlight-landscape":
         case "spotlight-portrait":
           return combineLatest(
-            [l.spotlight.layoutMedia$, ...l.grid.map((vm) => vm.media$)],
+            [l.spotlight.media$, ...l.grid.map((vm) => vm.media$)],
             (spotlight, ...grid) => ({
               type: l.type,
               spotlight: spotlight.map((vm) => vm.id),
@@ -234,7 +234,7 @@ function summarizeLayout$(l$: Observable<Layout>): Observable<LayoutSummary> {
           );
         case "spotlight-expanded":
           return combineLatest(
-            [l.spotlight.layoutMedia$, l.pip?.media$ ?? constant(undefined)],
+            [l.spotlight.media$, l.pip?.media$ ?? constant(undefined)],
             (spotlight, pip) => ({
               type: l.type,
               spotlight: spotlight.map((vm) => vm.id),
@@ -265,7 +265,7 @@ function summarizeLayout$(l$: Observable<Layout>): Observable<LayoutSummary> {
             }),
           );
         case "pip":
-          return l.spotlight.layoutMedia$.pipe(
+          return l.spotlight.media$.pipe(
             map((spotlight) => ({
               type: l.type,
               spotlight: spotlight.map((vm) => vm.id),
@@ -417,7 +417,7 @@ describe.each(modes)("CallViewModel (%s mode)", (mode) => {
     });
   });
 
-  test("spotlight carousel includes the camera and falls back after share stop", () => {
+  test("spotlight carousel only includes screen shares and restores cameras after share stop", () => {
     withTestScheduler(({ behavior, expectObservable }) => {
       withCallViewModel(
         {
@@ -428,7 +428,7 @@ describe.each(modes)("CallViewModel (%s mode)", (mode) => {
         (vm) => {
           expectObservable(spotlightCarouselIds$(vm.layout$)).toBe("abc", {
             a: [`${aliceId}:0`],
-            b: [`${aliceId}:0:screen-share`, `${aliceId}:0`],
+            b: [`${aliceId}:0:screen-share`],
             c: [`${aliceId}:0`],
           });
         },

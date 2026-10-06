@@ -41,35 +41,32 @@ it("reuses spotlight subscriptions, but releases each removed spotlight", () => 
   }
 });
 
-it("keeps carousel cameras in the grid while reusing scoped spotlight selection", () => {
+it("keeps cameras in the grid and reuses the share-only spotlight", () => {
   const scope = testScope();
   const membership = mockRtcMembership("@alice:example.org", "A");
   const participant = mockRemoteParticipant({});
   const camera = mockRemoteMedia(membership, {}, participant);
   const share = mockRemoteScreenShare(membership, {}, participant);
   const add = TileStore.empty(scope).from(Infinity);
-  add.registerSpotlight([share], false, "solid", [share, camera]);
+  add.registerSpotlight([share], false);
   add.registerGridTile(camera);
   let tiles = add.build();
   const spotlight = tiles.spotlightTile!;
-  expect(spotlight.layoutMedia$.value).toEqual([share]);
-  expect(spotlight.media$.value).toEqual([share, camera]);
+  expect(spotlight.media$.value).toEqual([share]);
   expect(tiles.gridTilesByMedia.has(camera)).toBe(true);
 
-  spotlight.setVisibleMedia(camera.id);
   const reuse = tiles.from(Infinity);
-  reuse.registerSpotlight([share], true, "solid", [share, camera]);
+  reuse.registerSpotlight([share], true);
   reuse.registerGridTile(camera);
   tiles = reuse.build();
   expect(tiles.spotlightTile).toBe(spotlight);
-  expect(spotlight.selectedMedia$.value).toBe(camera);
+  expect(spotlight.selectedMedia$.value).toBe(share);
 
   const stopSharing = tiles.from(Infinity);
   stopSharing.registerSpotlight([camera], false);
   stopSharing.registerGridTile(camera);
   tiles = stopSharing.build();
   expect(spotlight.media$.value).toEqual([camera]);
-  expect(spotlight.layoutMedia$.value).toEqual([camera]);
   expect(spotlight.selectedMedia$.value).toBe(camera);
   spotlight.setVisibleMedia(share.id);
   expect(spotlight.selectedMedia$.value).toBe(camera);

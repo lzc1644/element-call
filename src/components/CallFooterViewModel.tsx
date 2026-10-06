@@ -168,7 +168,7 @@ export function createCallFooterViewModel(
     showFooter$: callModel.showFooter$,
     hideControls$: constant(!showControls),
     showModals$: callModel.showModals$,
-    // 桌面端保持绝对悬浮；手机端显示时由 CSS 改为 sticky，避开本地 PiP。
+    // Controls float over the media on every platform.
     asOverlay$: constant(true),
     // Keep the upstream snapshot shape while retaining this fork's no-logo UI.
     showLogo$: constant(false),

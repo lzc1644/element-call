@@ -399,15 +399,8 @@ function assertGeometry(measurements: GeometryState[], caseName: string): void {
       `${diagnostic}\nscreen share top is not aligned with the header bottom`,
     ).toBeLessThanOrEqual(1);
 
-    if (
-      measurement.footer.visible &&
-      measurement.lastVisibleParticipant !== null &&
-      measurement.footer.box !== null
-    ) {
-      expect(
-        measurement.footerParticipantOverlapPixels,
-        `${diagnostic}\nfooter/participant overlap: ${measurement.footerParticipantOverlapPixels}px`,
-      ).toBeLessThanOrEqual(1);
-    }
+    // Mobile controls deliberately float over continuing participant tiles.
+    expect(measurement.footer.position, diagnostic).toBe("absolute");
+    expect(measurement.footer.display, diagnostic).toBe("flex");
   }
 }

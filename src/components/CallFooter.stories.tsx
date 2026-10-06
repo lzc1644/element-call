@@ -5,9 +5,11 @@ SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
 */
 
-import { expect, fn, userEvent, within } from "storybook/test";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { BehaviorSubject } from "rxjs";
-import { type JSX, type ReactNode, useState } from "react";
+import { type JSX, type ReactNode, useMemo, useState } from "react";
+import { animated } from "@react-spring/web";
+import useMeasure from "react-use-measure";
 import { Link } from "@vector-im/compound-web";
 
 import type { Meta, StoryObj } from "@storybook/react-vite";
@@ -22,6 +24,12 @@ import { globalScope } from "../state/ObservableScope";
 import { constant } from "../state/Behavior";
 import { type LayoutMode } from "../state/LayoutSwitchViewModel";
 import { RootElementProvider } from "../RootElementContext";
+import { Grid, type TileProps } from "../grid/Grid";
+import { makeGridLayout } from "../grid/GridLayout";
+import { type Alignment, type GridLayout } from "../state/layout-types";
+import { GridTileViewModel, type TileViewModel } from "../state/TileViewModel";
+import { createBaseUserMedia } from "../state/media/UserMediaViewModel";
+import { E2eeType } from "../e2ee/e2eeType";
 
 // consts for tests
 const reactionIdentifier = "@user:example.com:DEVICE";
@@ -50,6 +58,9 @@ function CallFooterStoryWrapper({
   setLayout,
   theme,
   height = 600,
+  width,
+  platform = "desktop",
+  participantGrid = false,
   ...vmSnapshot
 }: Omit<FooterSnapshot, "layoutSwitchVm"> & {
   children?: false | JSX.Element | JSX.Element[] | undefined;
@@ -57,18 +68,30 @@ function CallFooterStoryWrapper({
   setLayout: (value: LayoutMode) => void;
   theme: "light" | "dark";
   height?: number;
+  width?: number;
+  platform?: "desktop" | "android" | "ios";
+  participantGrid?: boolean;
 }): ReactNode {
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
+  const [controlsHidden, setControlsHidden] = useState(false);
+  const [footerRef, footerBounds] = useMeasure();
   const vm = useStaticViewModel({
     ...vmSnapshot,
+    showFooter: vmSnapshot.showFooter && !controlsHidden,
     layoutSwitchVm: layout && { layout$: constant(layout), setLayout },
   });
   return (
     <MediaDevicesContext value={mediaDevices}>
+      {participantGrid && (
+        <button onClick={() => setControlsHidden(!controlsHidden)}>
+          Toggle controls
+        </button>
+      )}
       <div
         ref={setRoot}
         data-element-call-root
-        style={{ height }}
+        data-platform={platform}
+        style={{ height, width, container: "element-call / size" }}
         className={`${inCallViewStyles.inRoom} cpd-theme-${theme}`}
       >
         <RootElementProvider value={root}>
@@ -80,7 +103,28 @@ function CallFooterStoryWrapper({
                 Promise.resolve(),
             }}
           >
-            <CallFooter vm={vm} />
+            {participantGrid ? (
+              <div
+                className={`${inCallViewStyles.inRoom} ${inCallViewStyles.overflowing}`}
+                data-testid="grid-call"
+              >
+                <div
+                  className={inCallViewStyles.media}
+                  style={{
+                    "--call-footer-height": `${footerBounds.height}px`,
+                  }}
+                >
+                  <ParticipantGrid width={width ?? 390} height={height} />
+                </div>
+                <CallFooter
+                  vm={vm}
+                  ref={footerRef}
+                  className={inCallViewStyles.footer}
+                />
+              </div>
+            ) : (
+              <CallFooter vm={vm} />
+            )}
           </ReactionsSenderContext>
         </RootElementProvider>
       </div>
@@ -461,3 +505,202 @@ export const LobbyRecentButtonMobile: Story = {
     ...Default.parameters,
   },
 };
+
+export const DesktopOverlay: Story = {
+  ...Default,
+  args: { ...Default.args, asOverlay: true },
+  play: async ({ canvasElement }) => {
+    const footer = within(canvasElement).getByTestId("footer-container");
+    const toolbar = footer.firstElementChild as HTMLElement;
+    await expect(getComputedStyle(footer).position).toBe("absolute");
+    await expect(getComputedStyle(toolbar).backgroundImage).toContain(
+      "linear-gradient",
+    );
+    await expect(getComputedStyle(toolbar).boxShadow).not.toBe("none");
+  },
+};
+
+export const AndroidFloatingGrid: Story = {
+  ...Default,
+  args: {
+    ...Default.args,
+    asOverlay: true,
+    platform: "android",
+    participantGrid: true,
+    width: 390,
+    height: 700,
+    toggleScreenSharing: undefined,
+    audioOutputSwitcher: { targetOutput: "speaker", switch: fn() },
+  },
+  play: assertFloatingGrid,
+};
+
+export const IOSFloatingGrid: Story = {
+  ...AndroidFloatingGrid,
+  args: { ...AndroidFloatingGrid.args, platform: "ios" },
+};
+
+export const ShortNarrowFloatingGrid: Story = {
+  ...AndroidFloatingGrid,
+  args: { ...AndroidFloatingGrid.args, width: 320, height: 380 },
+};
+
+async function assertFloatingGrid({
+  canvasElement,
+}: {
+  canvasElement: HTMLElement;
+}): Promise<void> {
+  const canvas = within(canvasElement);
+  const call = canvas.getByTestId("grid-call");
+  const footer = canvas.getByTestId("footer-container");
+  const toolbar = footer.firstElementChild as HTMLElement;
+  const grid = call.querySelector('[data-scrollable="true"]') as HTMLElement;
+  const bottom = call.getBoundingClientRect().bottom;
+  await waitFor(async () => {
+    await expect(grid.getBoundingClientRect().bottom).toBe(bottom);
+    await expect(grid.scrollHeight).toBeGreaterThan(grid.clientHeight);
+  });
+  await expect(getComputedStyle(footer).position).toBe("absolute");
+  await expect(getComputedStyle(footer).backgroundImage).toBe("none");
+  await expect(getComputedStyle(footer).backgroundColor).toBe(
+    "rgba(0, 0, 0, 0)",
+  );
+  const toolbarStyle = getComputedStyle(toolbar);
+  await expect(toolbarStyle.backgroundImage).toContain("linear-gradient");
+  await expect(toolbarStyle.borderTopStyle).toBe("solid");
+  await expect(Number.parseFloat(toolbarStyle.borderTopWidth)).toBeGreaterThan(
+    0,
+  );
+  await expect(toolbarStyle.boxShadow).not.toBe("none");
+  await expect(toolbarStyle.backdropFilter).toContain("blur(");
+  await expect(Number.parseFloat(toolbarStyle.paddingTop)).toBeGreaterThan(0);
+  await expect(Number.parseFloat(toolbarStyle.paddingLeft)).toBeGreaterThan(0);
+  const mic = canvas.getByRole("switch", { name: "Mute microphone" });
+  await expect(getComputedStyle(mic).backgroundColor).not.toBe(
+    "rgba(0, 0, 0, 0)",
+  );
+  await expect(toolbar.getBoundingClientRect().right).toBeLessThanOrEqual(
+    call.getBoundingClientRect().right,
+  );
+  const visibleHeight = grid.clientHeight;
+  const visibleScrollHeight = grid.scrollHeight;
+  grid.scrollTop = grid.scrollHeight;
+  await waitFor(async () => {
+    const last = canvas.getAllByTestId("participant").at(-1)!;
+    await expect(last.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+      toolbar.getBoundingClientRect().top,
+    );
+  });
+  await userEvent.click(
+    canvas.getByRole("button", { name: "Toggle controls" }),
+  );
+  await waitFor(async () => {
+    await expect(footer).toHaveAttribute("data-controls-visible", "false");
+    await expect(
+      getComputedStyle(grid).getPropertyValue("--call-footer-clearance").trim(),
+    ).toBe("0px");
+    await expect(grid.clientHeight).toBe(visibleHeight);
+    await expect(grid.scrollHeight).toBeLessThan(visibleScrollHeight);
+  });
+  // Keyboard-revealed controls need the same final-row clearance as visible ones.
+  mic.focus();
+  await waitFor(async () => {
+    await expect(getComputedStyle(toolbar).opacity).toBe("1");
+    await expect(grid.scrollHeight).toBe(visibleScrollHeight);
+  });
+  grid.scrollTop = grid.scrollHeight;
+  await waitFor(async () => {
+    const last = canvas.getAllByTestId("participant").at(-1)!;
+    await expect(last.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+      toolbar.getBoundingClientRect().top,
+    );
+  });
+  mic.blur();
+  await userEvent.click(
+    canvas.getByRole("button", { name: "Toggle controls" }),
+  );
+  await waitFor(async () => {
+    await expect(grid.scrollHeight).toBe(visibleScrollHeight);
+    await expect(grid.getBoundingClientRect().bottom).toBe(bottom);
+  });
+}
+
+function ParticipantGrid({
+  width,
+  height,
+}: {
+  width: number;
+  height: number;
+}): ReactNode {
+  const model = useMemo<GridLayout>(
+    () => ({
+      type: "grid",
+      grid: Array.from(
+        { length: 20 },
+        (_, i) =>
+          new GridTileViewModel(
+            constant({
+              ...createBaseUserMedia(globalScope, {
+                id: String(i),
+                userId: `@participant${i}:example.org`,
+                displayName$: constant(`Participant ${i + 1}`),
+                mxcAvatarUrl$: constant(undefined),
+                participant$: constant(null),
+                livekitRoom$: constant(undefined),
+                focusUrl$: constant(undefined),
+                encryptionSystem: { kind: E2eeType.NONE },
+                rtcBackendIdentity: String(i),
+                handRaised$: constant(null),
+                reaction$: constant(null),
+                statsType: "outbound-rtp",
+              }),
+              local: true as const,
+              mirror$: constant(false),
+              alwaysShow$: constant(false),
+              setAlwaysShow: fn(),
+              switchCamera$: constant(null),
+            }),
+          ),
+      ),
+      spotlightAlignment$: new BehaviorSubject<Alignment>({
+        block: "end",
+        inline: "end",
+      }),
+      setVisibleTiles: fn(),
+    }),
+    [],
+  );
+  const layout = useMemo(
+    () => makeGridLayout({ minBounds$: constant({ width, height }) }),
+    [width, height],
+  );
+  return (
+    <Grid
+      model={model}
+      Layout={layout.scrolling}
+      Tile={ParticipantTile}
+      scrolling
+      className={inCallViewStyles.scrollingGrid}
+    />
+  );
+}
+
+function ParticipantTile({
+  ref,
+  style,
+  model,
+  className,
+}: TileProps<TileViewModel, HTMLDivElement>): ReactNode {
+  return (
+    <animated.div
+      ref={ref}
+      style={{ ...style, background: "var(--cpd-color-bg-subtle-secondary)" }}
+      data-testid="participant"
+      className={`${className ?? ""} ${inCallViewStyles.tile}`}
+    >
+      {model instanceof GridTileViewModel
+        ? model.media$.value.displayName$.value
+        : null}
+    </animated.div>
+  );
+}
