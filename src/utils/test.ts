@@ -422,7 +422,7 @@ export function mockRemoteScreenShare(
 ): RemoteScreenShareViewModel {
   const member = mockMatrixRoomMember(rtcMember, roomMember);
   return createRemoteScreenShare(testScope(), {
-    id: "screenshare",
+    id: `${rtcMember.userId}:${rtcMember.deviceId}:screenshare`,
     userId: member.userId,
     participant$: constant(participant),
     encryptionSystem: { kind: E2eeType.PER_PARTICIPANT },

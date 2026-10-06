@@ -24,12 +24,10 @@ import {
   createContext,
   memo,
   use,
-  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
 } from "react";
 import useMeasure from "react-use-measure";
 import classNames from "classnames";
@@ -232,6 +230,8 @@ interface Props<
   Tile: ComponentType<TileProps<TileModel, TileRef>>;
   className?: string;
   style?: CSSProperties;
+  /** Scroll slots and their animated tiles in the same viewport. */
+  scrolling?: boolean;
 }
 
 /**
@@ -248,6 +248,7 @@ export function Grid<
   Tile,
   className,
   style,
+  scrolling = false,
 }: Props<LayoutModel, TileModel, LayoutRef, TileRef>): ReactNode {
   // Overview: This component places tiles by rendering an invisible layout grid
   // of "slots" for tiles to go in. Once rendered, it uses the DOM API to get
@@ -260,27 +261,6 @@ export function Grid<
   const [gridRef1, gridBounds] = useMeasure();
   const [gridRoot, gridRef2] = useState<HTMLElement | null>(null);
   const gridRef = useMergedRefs<HTMLElement>(gridRef1, gridRef2);
-
-  const windowHeight = useSyncExternalStore(
-    useCallback((onChange) => {
-      window.addEventListener("resize", onChange);
-      return (): void => window.removeEventListener("resize", onChange);
-    }, []),
-    useCallback(() => window.innerHeight, []),
-  );
-  const orientation = useSyncExternalStore(
-    useCallback((onChange) => {
-      // Support for the change event is experimental
-      // https://developer.mozilla.org/en-US/docs/Web/API/Screen/change_event#browser_compatibility
-      (screen as unknown as EventTarget).addEventListener?.("change", onChange);
-      return (): void =>
-        (screen as unknown as EventTarget).removeEventListener?.(
-          "change",
-          onChange,
-        );
-    }, []),
-    useCallback(() => window.innerHeight, []),
-  );
 
   const [layoutRoot, setLayoutRoot] = useState<HTMLElement | null>(null);
   const [generation, setGeneration] = useState<number | null>(null);
@@ -351,16 +331,14 @@ export function Grid<
     }
 
     return result;
-    // The rects may change due to the grid resizing, changing orientation, or
+    // The rects may change due to the grid resizing or
     // updating to a new generation, but eslint can't statically verify this
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gridRoot, layoutRoot, tiles, gridBounds, orientation, generation]);
+  }, [gridRoot, layoutRoot, tiles, gridBounds, generation]);
 
-  // The height of the portion of the grid visible at any given time
-  const visibleHeight = useMemo(
-    () => Math.min(gridBounds.bottom, windowHeight) - gridBounds.top,
-    [gridBounds, windowHeight],
-  );
+  // This is the first page's capacity, not the current scrolled page. Feeding
+  // scroll position back into TileStore would reorder members while scrolling.
+  const visibleHeight = gridBounds.height;
 
   useEffect(() => {
     visibleTilesCallback?.(
@@ -549,7 +527,10 @@ export function Grid<
   return (
     <div
       ref={gridRef}
-      className={classNames(className, styles.grid)}
+      className={classNames(className, styles.grid, {
+        [styles.scrolling]: scrolling,
+      })}
+      data-scrollable={scrolling}
       style={style}
     >
       <LayoutContext value={context}>

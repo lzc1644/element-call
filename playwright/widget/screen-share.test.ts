@@ -161,8 +161,39 @@ widgetTest("Sharing screen in group call", async ({ addUser, browserName }) => {
 
     await expect(frame.getByRole("radio", { name: "Spotlight" })).toBeChecked();
   }
-  // await alice.page.pause();
-  // await bob.page.pause();
+  // Hiding the member rail also hides the speaker preview, without removing
+  // the shared video or changing the media model.
+  {
+    const frame = bob.page
+      .locator('iframe[title="Element Call"]')
+      .contentFrame();
+    const call = frame.locator("[data-layout]");
+    const share = frame.locator('video[data-lk-source="screen_share"]');
+
+    for (let cycle = 0; cycle < 2; cycle++) {
+      await frame.getByRole("button", { name: "Expand", exact: true }).click();
+      await expect(call).toHaveAttribute("data-members-hidden", "true");
+      await expect(frame.getByTestId("footer-container")).toHaveCSS(
+        "background-image",
+        "none",
+      );
+      await expect(
+        frame.getByTestId("videoTile").filter({ visible: true }),
+      ).toHaveCount(1);
+      // The carousel retains Alice's share and camera, plus the hidden PiP.
+      await expect(frame.getByTestId("videoTile")).toHaveCount(3);
+      await expect(share).toBeVisible();
+
+      await frame
+        .getByRole("button", { name: "Collapse", exact: true })
+        .click();
+      await expect(call).toHaveAttribute("data-members-hidden", "false");
+      await expect(
+        frame.getByTestId("videoTile").filter({ visible: true }),
+      ).toHaveCount(4);
+      await expect(share).toBeVisible();
+    }
+  }
 
   // Let's start another screen share from bob
   await toggleScreenSharing(bob.page);

@@ -22,6 +22,7 @@ import {
 } from "@testing-library/react";
 import { type LocalParticipant } from "livekit-client";
 import { BehaviorSubject, of } from "rxjs";
+import { type CallMembership } from "matrix-js-sdk/lib/matrixrtc";
 import { BrowserRouter } from "react-router-dom";
 import { TooltipProvider } from "@vector-im/compound-web";
 import { RoomContext, useLocalParticipant } from "@livekit/components-react";
@@ -46,7 +47,13 @@ import {
   type CallViewModel,
   type CallViewModelOptions,
 } from "../state/CallViewModel/CallViewModel";
-import { alice, local } from "../utils/test-fixtures";
+import {
+  alice,
+  aliceRtcMember,
+  bobRtcMember,
+  local,
+  localRtcMember as localFixtureRtcMember,
+} from "../utils/test-fixtures";
 import { ReactionsSenderProvider } from "../reactions/useReactionsSender";
 import { useRoomEncryptionSystem } from "../e2ee/sharedKeyManagement";
 import { LivekitRoomAudioRenderer } from "../livekit/MatrixAudioRenderer";
@@ -57,6 +64,8 @@ import { type MatrixInfo } from "./VideoPreview";
 import { ProcessorProvider } from "../livekit/TrackProcessorContext";
 import { initializeWidget } from "../widget";
 import { RootElementProvider } from "../RootElementContext";
+import { constant } from "../state/Behavior";
+import styles from "./InCallView.module.css";
 
 initializeWidget();
 vi.hoisted(
@@ -139,6 +148,7 @@ beforeEach(() => {
 });
 interface CreateInCallViewArgs {
   mediaDevices?: ECMediaDevices;
+  initialRtcMemberships?: CallMembership[];
   callViewModelOptions?: Partial<CallViewModelOptions>;
   /** If true, wraps the rendered tree in an AppBar provider */
   withAppBar?: boolean;
@@ -160,7 +170,7 @@ function createInCallView(args: CreateInCallViewArgs = {}): RenderResult & {
   const { vm, footerVm, developerSettingsVm, rtcSession } =
     getBasicCallViewModelEnvironment(
       [local, alice],
-      undefined,
+      args.initialRtcMemberships,
       mediaDevices,
       args.callViewModelOptions,
     );
@@ -211,6 +221,54 @@ describe("InCallView", () => {
     it("renders", () => {
       const { container } = createInCallView();
       expect(container).toMatchSnapshot();
+    });
+  });
+
+  describe("member visibility", () => {
+    it("keeps the media layers mounted when members are hidden and restored", () => {
+      const { vm, container } = createInCallView();
+      const call = container.querySelector("[data-layout]")!;
+      const fixed = call.querySelector(`.${styles.fixedGrid}`);
+      const scrolling = call.querySelector(`.${styles.scrollingGrid}`);
+
+      expect(call).toHaveAttribute("data-members-hidden", "false");
+      act(() => vm.layoutSwitchVm$.value!.setLayout("spotlight"));
+      const initial = vm.layout$.value;
+      expect(initial.type).toBe("spotlight-landscape");
+
+      for (let cycle = 0; cycle < 2; cycle++) {
+        act(() => vm.toggleSpotlightExpanded$.value!());
+        expect(call).toHaveAttribute("data-layout", "spotlight-expanded");
+        expect(call).toHaveAttribute("data-members-hidden", "true");
+        const hidden = vm.layout$.value;
+        if ("spotlight" in initial && "spotlight" in hidden)
+          expect(hidden.spotlight).toBe(initial.spotlight);
+        expect(call.querySelector(`.${styles.fixedGrid}`)).toBe(fixed);
+        expect(call.querySelector(`.${styles.scrollingGrid}`)).toBe(scrolling);
+
+        act(() => vm.toggleSpotlightExpanded$.value!());
+        expect(call).toHaveAttribute("data-members-hidden", "false");
+        expect(call).toHaveAttribute("data-layout", "spotlight-landscape");
+        expect(call.querySelector(`.${styles.fixedGrid}`)).toBe(fixed);
+        expect(call.querySelector(`.${styles.scrollingGrid}`)).toBe(scrolling);
+      }
+    });
+
+    it("does not hide the automatic PiP in a flat call", () => {
+      const { vm, container } = createInCallView({
+        initialRtcMemberships: [
+          localFixtureRtcMember,
+          aliceRtcMember,
+          bobRtcMember,
+        ],
+        callViewModelOptions: {
+          windowSize$: constant({ width: 1000, height: 500 }),
+        },
+      });
+      act(() => vm.layoutSwitchVm$.value!.setLayout("spotlight"));
+      const call = container.querySelector("[data-layout]")!;
+      expect(call).toHaveAttribute("data-layout", "spotlight-expanded");
+      expect(call).toHaveAttribute("data-members-hidden", "false");
     });
   });
 
