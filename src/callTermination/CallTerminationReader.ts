@@ -23,8 +23,8 @@ import {
 import { Subject } from "rxjs";
 
 import {
-  ElementCallTerminateEventType,
-  type CallTerminateEventContent,
+  isCallTerminationEvent,
+  parseCallTerminationEvent,
   type TerminationEvent,
 } from ".";
 import { type ObservableScope } from "../state/ObservableScope";
@@ -47,38 +47,6 @@ type ObservedMembership = {
   createdTs?: number;
   leftAt?: number;
 };
-
-/**
- * Parses the custom termination payload without making decisions about the
- * current call. The authenticated Matrix sender supplies the identity.
- */
-function parseTerminationEvent(
-  event: MatrixEvent,
-  sender: string,
-): TerminationEvent | undefined {
-  if (event.getType() !== ElementCallTerminateEventType || event.isState()) {
-    return undefined;
-  }
-
-  const eventTimestamp = event.getTs();
-  const content = event.getContent() as unknown as CallTerminateEventContent;
-  if (
-    !isPositiveFiniteNumber(eventTimestamp) ||
-    typeof content.terminated_by !== "string" ||
-    content.terminated_by.length === 0 ||
-    content.terminated_by !== sender ||
-    !isPositiveFiniteNumber(content.timestamp) ||
-    (content.reason !== undefined && typeof content.reason !== "string")
-  ) {
-    return undefined;
-  }
-
-  return {
-    terminatedBy: sender,
-    reason: content.reason,
-    timestamp: content.timestamp,
-  };
-}
 
 function isPositiveFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
@@ -120,8 +88,8 @@ function membershipBelongsToSession(
  * period covers the normal send-then-leave ordering without treating everyone
  * who ever joined as permanently authorised.
  *
- * When another participant sends an `io.element.call.terminate` event,
- * all other participants should automatically leave the call.
+ * An admitted termination envelope asks participants to leave regardless of
+ * whether they are using a standalone client or a native widget host.
  */
 export class CallTerminationReader {
   private readonly terminationSubject$ = new Subject<TerminationEvent>();
@@ -258,10 +226,7 @@ export class CallTerminationReader {
     const eventId = event.getId();
     if (!eventId) return;
 
-    if (
-      event.getType() === ElementCallTerminateEventType ||
-      event.isEncrypted()
-    ) {
+    if (isCallTerminationEvent(event) || event.isEncrypted()) {
       this.rememberLiveEvent(eventId);
       this.handleTerminationEvent(event);
     }
@@ -292,8 +257,7 @@ export class CallTerminationReader {
     if (!sender || !eventId) return;
     if (this.emittedEventIds.has(eventId)) return;
 
-    const eventType = event.getType();
-    if (eventType !== ElementCallTerminateEventType) {
+    if (!isCallTerminationEvent(event)) {
       // An encrypted event has no usable type/content until it is decrypted.
       // Decryption re-enters this same handler and therefore cannot bypass
       // the live-event or participant checks below.
@@ -313,7 +277,7 @@ export class CallTerminationReader {
 
     if (event.isBeingDecrypted() || event.isDecryptionFailure()) return;
 
-    const termination = parseTerminationEvent(event, sender);
+    const termination = parseCallTerminationEvent(event);
     if (!termination) {
       logger.warn(`Invalid termination event content from ${sender}`);
       this.liveEventIds.delete(eventId);

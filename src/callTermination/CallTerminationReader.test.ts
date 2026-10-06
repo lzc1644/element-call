@@ -25,34 +25,7 @@ import {
 } from "../utils/test-fixtures";
 import { mockRtcMembership, testScope } from "../utils/test";
 import { CallTerminationReader } from "./CallTerminationReader";
-import { ElementCallTerminateEventType } from ".";
-
-const makeTerminationEvent = ({
-  roomId,
-  sender,
-  eventId = `$terminate-${sender}:example.org`,
-  type = ElementCallTerminateEventType,
-  originServerTs = 12345,
-  content = {
-    terminated_by: sender,
-    timestamp: 12345,
-  },
-}: {
-  roomId: string;
-  sender: string;
-  eventId?: string;
-  type?: string;
-  originServerTs?: number;
-  content?: Record<string, unknown>;
-}): MatrixEvent =>
-  new MatrixEvent({
-    room_id: roomId,
-    event_id: eventId,
-    sender,
-    type,
-    origin_server_ts: originServerTs,
-    content,
-  });
+import { CallTerminationEventType, ElementCallTerminateEventType } from ".";
 
 function emitTimeline(
   rtcSession: ReturnType<typeof getBasicRTCSession>["rtcSession"],
@@ -71,7 +44,14 @@ function emitTimeline(
   );
 }
 
-describe("CallTerminationReader", () => {
+describe.each([CallTerminationEventType, ElementCallTerminateEventType])(
+  "CallTerminationReader (%s transport)",
+  (eventType) => {
+    runReaderTests(eventType);
+  },
+);
+
+function runReaderTests(eventType: string): void {
   test("emits a live termination event sent by another participant", () => {
     const { rtcSession } = getBasicRTCSession([local, alice]);
     const reader = new CallTerminationReader(
@@ -257,6 +237,25 @@ describe("CallTerminationReader", () => {
     expect(terminations).toStrictEqual([]);
   });
 
+  test("rejects a room member who is not a call participant", () => {
+    const { rtcSession } = getBasicRTCSession([local, alice], [localRtcMember]);
+    const reader = new CallTerminationReader(
+      testScope(),
+      rtcSession.asMockedSession(),
+      rtcSession.room.client,
+    );
+    const onTermination = vi.fn();
+    reader.termination$.subscribe(onTermination);
+    emitTimeline(
+      rtcSession,
+      makeTerminationEvent({
+        roomId: rtcSession.room.roomId,
+        sender: alice.userId,
+      }),
+    );
+    expect(onTermination).not.toHaveBeenCalled();
+  });
+
   test("uses the deprecated callId only as a scope fallback", () => {
     const { rtcSession } = getBasicRTCSession([local, alice]);
     Object.assign(rtcSession, { callId: "another-call" });
@@ -351,11 +350,11 @@ describe("CallTerminationReader", () => {
     });
     vi.spyOn(rtcSession.room.client, "decryptEventIfNeeded").mockImplementation(
       async () => {
-        event.event.type = ElementCallTerminateEventType;
-        event.event.content = {
+        event.event.type = eventType;
+        event.event.content = encodeContent({
           terminated_by: alice.userId,
           timestamp: 12345,
-        };
+        });
         rtcSession.room.client.emit(MatrixEventEvent.Decrypted, event);
         await Promise.resolve();
       },
@@ -478,7 +477,7 @@ describe("CallTerminationReader", () => {
       rtcMemberships$.next([aliceMembership]);
       rtcMemberships$.next([localMembership(5000), aliceMembership]);
       if (encrypted) {
-        event.event.type = ElementCallTerminateEventType;
+        event.event.type = eventType;
         rtcSession.room.client.emit(MatrixEventEvent.Decrypted, event);
       } else {
         emitTimeline(rtcSession, event);
@@ -600,4 +599,37 @@ describe("CallTerminationReader", () => {
 
     expect(terminations).toStrictEqual([]);
   });
-});
+
+  function makeTerminationEvent({
+    roomId,
+    sender,
+    eventId = `$terminate-${sender}:example.org`,
+    type = eventType,
+    originServerTs = 12345,
+    content = { terminated_by: sender, timestamp: 12345 },
+  }: {
+    roomId: string;
+    sender: string;
+    eventId?: string;
+    type?: string;
+    originServerTs?: number;
+    content?: Record<string, unknown>;
+  }): MatrixEvent {
+    return new MatrixEvent({
+      room_id: roomId,
+      event_id: eventId,
+      sender,
+      type,
+      origin_server_ts: originServerTs,
+      content: encodeContent(content),
+    });
+  }
+
+  function encodeContent(
+    content: Record<string, unknown>,
+  ): Record<string, unknown> {
+    return eventType === CallTerminationEventType
+      ? { [ElementCallTerminateEventType]: content }
+      : content;
+  }
+}

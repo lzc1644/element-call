@@ -80,6 +80,7 @@ import {
 import { MatrixRTCMode } from "../../config/ConfigOptions.ts";
 import { initializeWidget } from "../../widget.ts";
 import {
+  CallTerminationEventType,
   ElementCallTerminateEventType,
   type TerminationEvent,
 } from "../../callTermination";
@@ -1647,8 +1648,13 @@ describe.each(modes)("CallViewModel (%s mode)", (mode) => {
       expect(rtcSession.room.client.sendEvent).toHaveBeenCalledOnce();
       expect(rtcSession.room.client.sendEvent).toHaveBeenCalledWith(
         rtcSession.room.roomId,
-        ElementCallTerminateEventType,
-        { terminated_by: localRtcMember.userId, timestamp: expect.any(Number) },
+        CallTerminationEventType,
+        {
+          [ElementCallTerminateEventType]: {
+            terminated_by: localRtcMember.userId,
+            timestamp: expect.any(Number),
+          },
+        },
         expect.any(String),
       );
       expect(onLeave).not.toHaveBeenCalled();

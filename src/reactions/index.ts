@@ -1,4 +1,5 @@
 /*
+Copyright 2026 Element Creations Ltd.
 Copyright 2024 New Vector Ltd.
 
 SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
@@ -30,7 +31,7 @@ import waveSoundMp3 from "../sound/reactions/wave.mp3?url";
 import baduntssSoundOgg from "../sound/reactions/baduntss.ogg?url";
 import baduntssSoundMp3 from "../sound/reactions/baduntss.mp3?url";
 
-export const ElementCallReactionEventType = "io.element.call.reaction";
+export { ElementCallReactionEventType } from "./events";
 
 export interface ReactionOption {
   /**

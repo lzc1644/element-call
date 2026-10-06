@@ -1,4 +1,5 @@
 /*
+Copyright 2026 Element Creations Ltd.
 Copyright 2026 New Vector Ltd.
 
 SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
@@ -11,8 +12,10 @@ import { createRoomWidgetClient, EventType } from "matrix-js-sdk";
 import { getUrlParams } from "./UrlParams";
 import { initializeWidget } from "./widget";
 import { Config } from "./config/Config";
-import { ElementCallReactionEventType } from "./reactions";
-import { ElementCallTerminateEventType } from "./callTermination";
+import {
+  CallTerminationEventType,
+  ElementCallTerminateEventType,
+} from "./callTermination";
 
 vi.mock("matrix-js-sdk", { spy: true });
 const createRoomWidgetClientSpy = vi.mocked(createRoomWidgetClient);
@@ -65,8 +68,7 @@ describe("widget", () => {
       EventType.CallEncryptionKeysPrefix,
       EventType.Reaction,
       EventType.RoomRedaction,
-      ElementCallReactionEventType,
-      ElementCallTerminateEventType,
+      CallTerminationEventType,
       EventType.RTCDecline,
       EventType.RTCMembership,
     ];
@@ -106,7 +108,7 @@ describe("widget", () => {
 
     expect(createRoomWidgetClientSpy.mock.calls[0][1]).toStrictEqual({
       sendEvent: [...sendEvent, ...sendRecvEvent],
-      receiveEvent: sendRecvEvent,
+      receiveEvent: [...sendRecvEvent, ElementCallTerminateEventType],
       sendState,
       receiveState,
       sendToDevice: sendRecvToDevice,

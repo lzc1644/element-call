@@ -1,4 +1,5 @@
 /*
+Copyright 2026 Element Creations Ltd.
 Copyright 2024 New Vector Ltd.
 
 SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
@@ -11,13 +12,16 @@ import {
 } from "../reactions";
 import {
   type CallTerminateEventContent,
+  type CallTerminationEventContent,
   type ElementCallTerminateEventType,
 } from "../callTermination";
 
 // Extend Matrix JS SDK types via Typescript declaration merging to support unspecced event fields and types
 declare module "matrix-js-sdk/lib/types" {
   export interface TimelineEvents {
-    [ElementCallReactionEventType]: ECallReactionEventContent;
+    [ElementCallReactionEventType]:
+      | ECallReactionEventContent
+      | CallTerminationEventContent;
     [ElementCallTerminateEventType]: CallTerminateEventContent;
   }
 
