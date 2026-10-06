@@ -93,8 +93,8 @@ import { HeaderStyle, type UrlParams } from "../../UrlParams";
 import { type ProcessorState } from "../../livekit/TrackProcessorContext";
 import { type HostBridge, nullHostBridge } from "../../HostBridge";
 import {
-  ElementCallTerminateEventType,
-  type CallTerminateEventContent,
+  CallTerminationEventType,
+  createCallTerminationContent,
   type TerminationEvent,
 } from "../../callTermination";
 import { CallTerminationReader } from "../../callTermination/CallTerminationReader";
@@ -1049,14 +1049,10 @@ export function createCallViewModel$(
         await client.resendEvent(failedTerminationEvent, matrixRoom);
       } else {
         transactionId = uuidv4();
-        const content: CallTerminateEventContent = {
-          terminated_by: userId,
-          timestamp: Date.now(),
-        };
         await client.sendEvent(
           matrixRoom.roomId,
-          ElementCallTerminateEventType,
-          content,
+          CallTerminationEventType,
+          createCallTerminationContent(userId),
           transactionId,
         );
       }

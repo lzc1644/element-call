@@ -1,4 +1,5 @@
 /*
+Copyright 2026 Element Creations Ltd.
 Copyright 2022-2024 New Vector Ltd.
 
 SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
@@ -22,8 +23,10 @@ import { LazyEventEmitter } from "./LazyEventEmitter";
 import { getUrlParams } from "./UrlParams";
 import { Config } from "./config/Config";
 import { seedSettingsFromConfig } from "./settings/settings";
-import { ElementCallReactionEventType } from "./reactions";
-import { ElementCallTerminateEventType } from "./callTermination";
+import {
+  CallTerminationEventType,
+  ElementCallTerminateEventType,
+} from "./callTermination";
 
 // Subset of the actions in element-web
 export enum ElementWidgetActions {
@@ -130,8 +133,8 @@ export const initializeWidget = (
         EventType.CallEncryptionKeysPrefix,
         EventType.Reaction,
         EventType.RoomRedaction,
-        ElementCallReactionEventType,
-        ElementCallTerminateEventType,
+        // The shared call-event transport carries reactions and termination.
+        CallTerminationEventType,
         EventType.RTCDecline,
         EventType.RTCMembership,
       ];
@@ -170,7 +173,8 @@ export const initializeWidget = (
         api,
         {
           sendEvent: [...sendEvent, ...sendRecvEvent],
-          receiveEvent: sendRecvEvent,
+          // Legacy termination remains readable on hosts which grant it.
+          receiveEvent: [...sendRecvEvent, ElementCallTerminateEventType],
           sendState,
           receiveState,
           sendToDevice: sendRecvToDevice,

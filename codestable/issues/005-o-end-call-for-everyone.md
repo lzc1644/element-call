@@ -10,7 +10,7 @@ created: 2026-10-06
 
 ## 接手先读
 
-本文件是用户已确认方案的执行交接。**第一版核心修复、UI 状态及定向单测已实现，等待方向确认；还不是完整验收或关闭。** 实际改动、检查与未验证项见文末执行记录。用户最终选择的是**尽力通知所有参与端退出**，接受异常设备可能未退出；不要恢复此前讨论过的服务端强制结束、全员确认或复杂恢复方案。
+本文件是用户已确认方案的执行交接。**第一版已提交；Android/iOS Element X 实测暴露了宿主收发权限问题，本轮已修复共享事件信封并通过定向测试，待部署新版及真机复测；还不是完整验收或关闭。** 实际改动、检查与未验证项见文末执行记录。用户最终选择的是**尽力通知所有参与端退出**，接受异常设备可能未退出；不要恢复此前讨论过的服务端强制结束、全员确认或复杂恢复方案。
 
 这是本地用户确认的功能范围，不表示已有上游 issue 或维护者批准。后续模型接到实现指令后，以本文件为需求入口，先读取根 AGENTS.md、docs/agents/workflow.md，以及架构、代码风格和测试指南。当前稳定背景见 [Project Spec](../spec/index.md)。
 
@@ -35,16 +35,16 @@ created: 2026-10-06
 
 ## 当前证据与修改落点
 
-现有链路是 `terminateCall()` 发送 `io.element.call.terminate` → `CallTerminationReader` 校验事件 → `termination$` 进入 `leave$` → 现有媒体与宿主退出流程。
+当前链路是 `terminateCall()` 用 `callTermination` 编码 → 发送宿主已允许的 `io.element.call.reaction`，其中 `io.element.call.terminate` 字段承载原结束载荷 → `CallTerminationReader` 校验 → 一次性 `leave$` → 现有媒体与宿主退出流程。新版本统一使用此信封；只在接收侧保留初版独立 `io.element.call.terminate` 事件兼容，不做双发或发送失败后 fallback。
 
 接手时复核这些实现，避免依据过期行号修改：
 
 | 位置 | 当前行为及用途 |
 | --- | --- |
-| `src/callTermination/index.ts` | 已有事件类型与载荷：`terminated_by`、`timestamp`、可选 `reason`；本次沿用 |
-| `src/callTermination/CallTerminationReader.ts` | 实时事件、解密、房间、参与者、加入时间及去重检查；当前会忽略所有同账号事件，包括其他设备 |
-| `src/state/CallViewModel/CallViewModel.ts` | `terminateCall()` 在 `finally` 中触发自己退出，即使发送失败；`leave$` 已支持 `terminated` |
-| `src/components/CallFooterViewModel.tsx` | 当前发送失败只记录日志，需增加可见状态 |
+| `src/callTermination/index.ts` | 统一编码与识别新信封/旧事件，沿用 `terminated_by`、`timestamp`、可选 `reason` 载荷及 sender 一致性校验 |
+| `src/callTermination/CallTerminationReader.ts` | 两种编码共用实时、解密、房间、参与者、加入时间和去重检查；同账号设备及自己的服务器回显均可接收 |
+| `src/state/CallViewModel/CallViewModel.ts` | 成功发送才退出，失败保持通话；发送/重试有并发抑制，`leave$` 一次性且可重放 |
+| `src/components/CallFooterViewModel.tsx` | 映射发送中/失败状态与可用动作，保留第一版可见反馈 |
 | `src/button/EndCallMenuButton.tsx`、`src/components/CallFooter.tsx` | 复用菜单、二次确认与 footer，增加发送和失败状态 |
 | `src/widget.ts`、`src/HostBridge.ts` | 已声明结束事件收发并提供宿主挂断接口；验证实际宿主是否支持 |
 | `src/room/CallView.tsx`、本地成员生命周期 | 复用退出及宿主通知，不另建平行清理流程 |
@@ -117,7 +117,7 @@ created: 2026-10-06
 
 ## 第一版执行记录（2026-10-06）
 
-当前在 `feat/all-end` 分支，改动尚未提交。已到达仓库要求的**首次实现交接**，等待用户确认方向，再继续完整质量 pass。
+本节保留首次交接时的实现与验证结果。第一版后来按用户授权提交为 `6e6a6c79`，并合入 `dev`；这些检查当时不包含原生宿主实机兼容性验证。
 
 ### 已实现
 
@@ -176,3 +176,55 @@ created: 2026-10-06
 - widget 通道复用同一个本地 SDK 事件，但该 SDK 的 widget 发送接口不透传事务 ID；不额外承诺传输失败后服务端绝无重复通知。现有事件去重和通话生命周期的一次性离开仍保持不变。
 
 用户确认本版方向后，继续原计划第 3 步。关闭候选仍是“新版在线参与端通过现有事件尽力退出、失败可见且可手动重试、普通挂断仅当前设备、没有全员必退保证”；**尚不回写 Project Spec，也不关闭本 issue**。
+
+## 原生 widget 收发修复（2026-10-06）
+
+### 用户复现与根因
+
+用户在已配置自部署通话前端的 Android/iOS Element X 上点击“为所有人结束”，看到 `End notification not sent`；同一手机也不响应网页端结束。截图只证明发送失败，不提供具体 SDK 异常或客户端版本。
+
+前端早已同时请求独立 `io.element.call.terminate` 的发送和接收能力，缺失的不是 capability 声明，而是**宿主实际授予的权限**：
+
+- [Element X iOS 的 acquireCapabilities](https://github.com/element-hq/element-x-ios/blob/4640f9cec070d3277c476c467d99da46beae7ebe/ElementX/Sources/Services/ElementCall/ElementCallWidgetDriver.swift#L179-L183) 忽略动态请求列表，返回 `getElementCallRequiredPermissions()`。
+- [Element X Android 的 JoinedRustRoom](https://github.com/element-hq/element-x-android/blob/2cda8a03159b91eb70ed1510d8980eff05ef99be/libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/room/JoinedRustRoom.kt#L478-L485) 使用同一个固定权限提供器。
+- [Rust SDK 权限列表](https://github.com/matrix-org/matrix-rust-sdk/blob/161e46235dfb5ab93561671cd5819fdf6bad5715/bindings/matrix-sdk-ffi/src/widget.rs#L162-L202) 允许双向 `io.element.call.reaction`，不含独立的 `io.element.call.terminate`。
+- [Rust widget 状态机](https://github.com/matrix-org/matrix-rust-sdk/blob/161e46235dfb5ab93561671cd5819fdf6bad5715/crates/matrix-sdk/src/widget/machine/mod.rs#L508-L516) 拒绝未授予的发送；接收侧也按 `allow_reading` 过滤（同文件约 211 行）。这能同时解释两个方向的不通。
+
+以上是固定版本的宿主源码证据，不冒充对用户设备日志的直接采集；具体应用版本仍待实机复测记录。
+
+### 修复与范围
+
+- `callTermination` 统一定义编码、识别和解析。所有新发送，无论 standalone、widget、SDK 或 component，都用已允许的通话事件类型，内容为：
+
+  ```json
+  {
+    "io.element.call.terminate": {
+      "terminated_by": "@participant:server",
+      "timestamp": 12345
+    }
+  }
+  ```
+
+  外层 event type 是 `io.element.call.reaction`。不带 `emoji`、`name` 或表情 relation，不伪造一条用户表情。
+- reader 的 parse、实时准入和延迟解密路径共同调用模块识别器；旧独立事件仍可接收，所有房间/参与者/sender/时间/去重校验保持不变。
+- VM 只调用编码器和发送常量，发送状态、SDK 手动重试、一次退出、HostBridge 与媒体清理流程不变。没有 Android/iOS/Element X 品牌分支、自动 fallback、自动重试、新后端或全员确认机制。
+- widget 声明双向的新传输，旧独立类型仅保留接收；其旧接收能力仍取决于宿主是否允许。**新手机端不能替旧网页端绕过原生白名单，双方都必须重新加载新前端。**
+- `ReactionsReader` 明确忽略结束信封，避免表情显示/声音副作用；普通表情仍按原路径处理。SDK 的 timeline 类型声明为“普通表情或结束信封”，不靠错误类型断言压制检查。
+- 按模块边界反馈，把已有事件常量提取到无资产的 `src/reactions/events.ts`；原 `reactions/index.ts` 重导出维持兼容。控制协议不再静态引入表情音效，也不增加新的抽象层。
+
+### 定向验证
+
+- 八个相关文件的 `pnpm test:unit --run`：**180 通过、4 个原有跳过**。包括原接收校验套件在新/旧两种编码上运行、非通话房间成员拒绝、普通/非法信封拒绝、VM 的新发送内容、失败/重试/生命周期及现有表情/UI 回归。
+- 新 `CallTerminationTransport.test.ts` 用**真实 RoomWidgetClient**配合模拟 Rust 宿主允许列表，复现旧发送拒绝与旧接收过滤；验证“widget 发 → 网页 reader 收”“网页发 → widget SDK 实时 timeline → reader 收”，覆盖不同账号和同账号其他设备，并断言没有表情更新。这不是手机 WebView/Rust 二进制实测，也不包含真实加密网络交换。
+- `pnpm exec tsc --noEmit --pretty false`：通过；修改文件的 `oxlint`、`oxfmt`：通过。
+- 新 `playwright/widget/end-call-for-everyone.spec.ts` 覆盖加密群通话中从任一 widget 结束后双方通话页关闭、消息输入恢复及 MatrixRTC membership 清空。`playwright test --list ... --project=chromium` 能发现两条用例；**没有运行用例**，本地 `localhost:3000`、`app.m.localhost` 和 `synapse.m.localhost` 探测均拒绝连接，只有无关容器在运行。未启动或改动后端服务。
+- 本轮没有 UI 布局或新渲染状态，不新增故事；首版待补的 Storybook 状态、四目标构建、完整 gates 和覆盖率仍未完成。日志与源码取证临时副本在忽略的 `agent-workspace/end-call-widget-compat/`。
+
+### 部署后的实机复测
+
+1. 仅发布修改后的前端静态资源；网页和手机通话页都重新加载新版本，记录客户端/系统版本与实际加载的前端版本。部署另需授权。
+2. 在加密群通话中，分别由网页、Android、iOS 发起全员结束；核实本机和在线对端退出、声音停止、麦克风释放与宿主通话页关闭。
+3. 同账号网页和手机重复以上双向操作；普通挂断仍只离开当前设备。锁屏/断网等情形沿用原“尽力通知”边界，不增加追查。
+4. 若仍出现警告，提供 `[CallViewModel] Failed to send call termination notification` 对应的完整错误和应用版本，区分权限、加密、网络等实际失败；不直接据此增加重试或第二通道。
+
+本轮在 `dev` 上完成修改，**未 commit、push、部署或关闭**。真实 Element X/SchildiChat Next 尚待用户复测，不能把传输模拟通过写成全平台验收通过。
