@@ -1,4 +1,5 @@
 /*
+Copyright 2026 Element Creations Ltd.
 Copyright 2026 New Vector Ltd.
 
 SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
@@ -12,6 +13,7 @@ import {
   RoomEvent as MatrixRoomEvent,
 } from "matrix-js-sdk";
 import { describe, expect, test, vi } from "vitest";
+import { EventStatus } from "matrix-js-sdk/lib/models/event";
 
 import { getBasicRTCSession } from "../utils/test-viewmodel";
 import {
@@ -19,37 +21,11 @@ import {
   aliceDeviceId,
   local,
   localRtcMember,
+  localRtcMemberDevice2,
 } from "../utils/test-fixtures";
 import { mockRtcMembership, testScope } from "../utils/test";
 import { CallTerminationReader } from "./CallTerminationReader";
-import { ElementCallTerminateEventType } from ".";
-
-const makeTerminationEvent = ({
-  roomId,
-  sender,
-  eventId = `$terminate-${sender}:example.org`,
-  type = ElementCallTerminateEventType,
-  originServerTs = 12345,
-  content = {
-    terminated_by: sender,
-    timestamp: 12345,
-  },
-}: {
-  roomId: string;
-  sender: string;
-  eventId?: string;
-  type?: string;
-  originServerTs?: number;
-  content?: Record<string, unknown>;
-}): MatrixEvent =>
-  new MatrixEvent({
-    room_id: roomId,
-    event_id: eventId,
-    sender,
-    type,
-    origin_server_ts: originServerTs,
-    content,
-  });
+import { CallTerminationEventType, ElementCallTerminateEventType } from ".";
 
 function emitTimeline(
   rtcSession: ReturnType<typeof getBasicRTCSession>["rtcSession"],
@@ -68,7 +44,14 @@ function emitTimeline(
   );
 }
 
-describe("CallTerminationReader", () => {
+describe.each([CallTerminationEventType, ElementCallTerminateEventType])(
+  "CallTerminationReader (%s transport)",
+  (eventType) => {
+    runReaderTests(eventType);
+  },
+);
+
+function runReaderTests(eventType: string): void {
   test("emits a live termination event sent by another participant", () => {
     const { rtcSession } = getBasicRTCSession([local, alice]);
     const reader = new CallTerminationReader(
@@ -98,8 +81,11 @@ describe("CallTerminationReader", () => {
     ]);
   });
 
-  test("ignores termination events sent by the local user", () => {
-    const { rtcSession } = getBasicRTCSession([local, alice]);
+  test("admits termination from another device on the same account", () => {
+    const { rtcSession } = getBasicRTCSession(
+      [local],
+      [localRtcMember, localRtcMemberDevice2],
+    );
     const reader = new CallTerminationReader(
       testScope(),
       rtcSession.asMockedSession(),
@@ -118,7 +104,38 @@ describe("CallTerminationReader", () => {
       }),
     );
 
-    expect(terminations).toStrictEqual([]);
+    expect(terminations).toStrictEqual([
+      {
+        terminatedBy: localRtcMember.userId,
+        reason: undefined,
+        timestamp: 12345,
+      },
+    ]);
+  });
+
+  test("admits this device's server echo, but not its unsent local event", () => {
+    const { rtcSession } = getBasicRTCSession([local]);
+    const reader = new CallTerminationReader(
+      testScope(),
+      rtcSession.asMockedSession(),
+      rtcSession.room.client,
+    );
+    const onTermination = vi.fn();
+    reader.termination$.subscribe(onTermination);
+    const event = makeTerminationEvent({
+      roomId: rtcSession.room.roomId,
+      sender: localRtcMember.userId,
+    });
+    event.setStatus(EventStatus.SENDING);
+    emitTimeline(rtcSession, event);
+    event.setStatus(EventStatus.NOT_SENT);
+    emitTimeline(rtcSession, event);
+    expect(onTermination).not.toHaveBeenCalled();
+
+    event.setStatus(null);
+    emitTimeline(rtcSession, event);
+    emitTimeline(rtcSession, event);
+    expect(onTermination).toHaveBeenCalledOnce();
   });
 
   test.each([
@@ -220,6 +237,25 @@ describe("CallTerminationReader", () => {
     expect(terminations).toStrictEqual([]);
   });
 
+  test("rejects a room member who is not a call participant", () => {
+    const { rtcSession } = getBasicRTCSession([local, alice], [localRtcMember]);
+    const reader = new CallTerminationReader(
+      testScope(),
+      rtcSession.asMockedSession(),
+      rtcSession.room.client,
+    );
+    const onTermination = vi.fn();
+    reader.termination$.subscribe(onTermination);
+    emitTimeline(
+      rtcSession,
+      makeTerminationEvent({
+        roomId: rtcSession.room.roomId,
+        sender: alice.userId,
+      }),
+    );
+    expect(onTermination).not.toHaveBeenCalled();
+  });
+
   test("uses the deprecated callId only as a scope fallback", () => {
     const { rtcSession } = getBasicRTCSession([local, alice]);
     Object.assign(rtcSession, { callId: "another-call" });
@@ -314,11 +350,11 @@ describe("CallTerminationReader", () => {
     });
     vi.spyOn(rtcSession.room.client, "decryptEventIfNeeded").mockImplementation(
       async () => {
-        event.event.type = ElementCallTerminateEventType;
-        event.event.content = {
+        event.event.type = eventType;
+        event.event.content = encodeContent({
           terminated_by: alice.userId,
           timestamp: 12345,
-        };
+        });
         rtcSession.room.client.emit(MatrixEventEvent.Decrypted, event);
         await Promise.resolve();
       },
@@ -441,7 +477,7 @@ describe("CallTerminationReader", () => {
       rtcMemberships$.next([aliceMembership]);
       rtcMemberships$.next([localMembership(5000), aliceMembership]);
       if (encrypted) {
-        event.event.type = ElementCallTerminateEventType;
+        event.event.type = eventType;
         rtcSession.room.client.emit(MatrixEventEvent.Decrypted, event);
       } else {
         emitTimeline(rtcSession, event);
@@ -563,4 +599,37 @@ describe("CallTerminationReader", () => {
 
     expect(terminations).toStrictEqual([]);
   });
-});
+
+  function makeTerminationEvent({
+    roomId,
+    sender,
+    eventId = `$terminate-${sender}:example.org`,
+    type = eventType,
+    originServerTs = 12345,
+    content = { terminated_by: sender, timestamp: 12345 },
+  }: {
+    roomId: string;
+    sender: string;
+    eventId?: string;
+    type?: string;
+    originServerTs?: number;
+    content?: Record<string, unknown>;
+  }): MatrixEvent {
+    return new MatrixEvent({
+      room_id: roomId,
+      event_id: eventId,
+      sender,
+      type,
+      origin_server_ts: originServerTs,
+      content: encodeContent(content),
+    });
+  }
+
+  function encodeContent(
+    content: Record<string, unknown>,
+  ): Record<string, unknown> {
+    return eventType === CallTerminationEventType
+      ? { [ElementCallTerminateEventType]: content }
+      : content;
+  }
+}

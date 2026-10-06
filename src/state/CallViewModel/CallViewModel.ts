@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Element Creations Ltd.
+Copyright 2025, 2026 Element Creations Ltd.
 Copyright 2023, 2024, 2025 New Vector Ltd.
 
 SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
@@ -14,6 +14,7 @@ import {
   type RoomOptions,
 } from "livekit-client";
 import { type MatrixClient, type Room as MatrixRoom } from "matrix-js-sdk";
+import { EventStatus, type MatrixEvent } from "matrix-js-sdk/lib/models/event";
 import {
   BehaviorSubject,
   catchError,
@@ -33,6 +34,7 @@ import {
   switchAll,
   switchMap,
   switchScan,
+  shareReplay,
   take,
   tap,
   throttleTime,
@@ -91,8 +93,8 @@ import { HeaderStyle, type UrlParams } from "../../UrlParams";
 import { type ProcessorState } from "../../livekit/TrackProcessorContext";
 import { type HostBridge, nullHostBridge } from "../../HostBridge";
 import {
-  ElementCallTerminateEventType,
-  type CallTerminateEventContent,
+  CallTerminationEventType,
+  createCallTerminationContent,
   type TerminationEvent,
 } from "../../callTermination";
 import { CallTerminationReader } from "../../callTermination/CallTerminationReader";
@@ -318,6 +320,8 @@ export type LivekitRoomItem = {
  *
  * (Mocking this interface should allow building a full view in all states.)
  */
+export type CallTerminationState = "idle" | "sending" | "failed";
+
 export interface CallViewModel {
   // lifecycle
   autoLeave$: Observable<AutoLeaveReason>;
@@ -329,21 +333,19 @@ export interface CallViewModel {
    * Which visual element the ringing status should be shown in.
    */
   ringingStatusLocation: "app_bar" | "tile";
-  /** Observable that emits when the user should leave the call (hangup pressed, widget action, error).
-   * THIS DOES NOT LEAVE THE CALL YET. The only way to leave the call (send the hangup event) is
-   *  - by ending the scope
-   *  - or calling requestDisconnect
-   *
-   * TODO: it seems more reasonable to add a leave() method (that calls requestDisconnect) that will then update leave$ and remove the hangup pattern
+  /**
+   * Emits once when the call should leave, after requesting disconnect through
+   * the existing media and host lifecycle. The view then ends the call scope.
    */
   leave$: Observable<"user" | AutoLeaveReason | "terminated">;
   /** Call to initiate hangup. Use in conbination with reconnection state track the async hangup process. */
   hangup: () => void;
   /**
-   * Terminate the call for all participants.
-   * This sends a termination event to the room, causing all participants to leave.
+   * Send a best-effort termination notification, then leave on send success.
+   * A failed send stays in the call and can be retried explicitly.
    */
   terminateCall: () => Promise<void>;
+  terminationState$: Behavior<CallTerminationState>;
   // joining
   join: () => void;
 
@@ -1005,6 +1007,13 @@ export function createCallViewModel$(
   );
 
   const userHangup$ = new Subject<void>();
+  const terminationStateSubject$ = new BehaviorSubject<CallTerminationState>(
+    "idle",
+  );
+  const terminationState$ = scope.behavior(terminationStateSubject$);
+  let failedTerminationEvent: MatrixEvent | undefined;
+  let stopped = false;
+  scope.onEnd(stopTermination);
 
   const hostHangup$ = hostBridge.hangUp$.pipe(
     tap((request) => {
@@ -1018,7 +1027,65 @@ export function createCallViewModel$(
     autoLeave$,
     merge(userHangup$, hostHangup$).pipe(map(() => "user" as const)),
     termination$.pipe(map(() => "terminated" as const)),
-  ).pipe(scope.share);
+  ).pipe(
+    take(1),
+    scope.bind(),
+    shareReplay({ bufferSize: 1, refCount: false }),
+  );
+  // Retain the result before disconnect can tear down the scope, even when
+  // SDK callers have not yet subscribed or mounted a view.
+  leave$.subscribe(() => {
+    stopTermination();
+    localMembership.requestDisconnect();
+  });
+
+  const terminateCall = async (): Promise<void> => {
+    if (stopped || terminationStateSubject$.value === "sending") return;
+    terminationStateSubject$.next("sending");
+
+    let transactionId: string | undefined;
+    try {
+      if (failedTerminationEvent) {
+        await client.resendEvent(failedTerminationEvent, matrixRoom);
+      } else {
+        transactionId = uuidv4();
+        await client.sendEvent(
+          matrixRoom.roomId,
+          CallTerminationEventType,
+          createCallTerminationContent(userId),
+          transactionId,
+        );
+      }
+      if (stopped) return;
+      failedTerminationEvent = undefined;
+      userHangup$.next();
+    } catch (error) {
+      // Exact transaction lookup also works for network and widget failures,
+      // whose errors do not necessarily carry the SDK's pending event.
+      if (transactionId !== undefined) {
+        failedTerminationEvent = matrixRoom.getEventForTxnId(transactionId);
+      }
+      if (stopped) {
+        cancelFailedTermination();
+        return;
+      }
+      logger.warn("Failed to send call termination notification", error);
+      terminationStateSubject$.next("failed");
+    }
+  };
+
+  function stopTermination(): void {
+    stopped = true;
+    cancelFailedTermination();
+  }
+
+  function cancelFailedTermination(): void {
+    // Only discard an unsent copy. An in-flight request cannot be withdrawn.
+    if (failedTerminationEvent?.status === EventStatus.NOT_SENT) {
+      client.cancelPendingEvent(failedTerminationEvent);
+      failedTerminationEvent = undefined;
+    }
+  }
 
   const spotlightSpeaker$ = scope.behavior<UserMediaViewModel | undefined>(
     userMedia$.pipe(
@@ -1892,29 +1959,8 @@ export function createCallViewModel$(
     ringingStatusLocation: header === HeaderStyle.AppBar ? "app_bar" : "tile",
     leave$: leave$,
     hangup: (): void => userHangup$.next(),
-    terminateCall: async (): Promise<void> => {
-      logger.info("Terminating call for all participants");
-      const content: CallTerminateEventContent = {
-        terminated_by: userId,
-        timestamp: Date.now(),
-      };
-
-      try {
-        await client.sendEvent(
-          matrixRoom.roomId,
-          ElementCallTerminateEventType,
-          content,
-        );
-      } catch (error) {
-        logger.warn(
-          `Failed to send call termination event ${ElementCallTerminateEventType} in room ${matrixRoom.roomId}`,
-          error,
-        );
-        throw error;
-      } finally {
-        userHangup$.next();
-      }
-    },
+    terminateCall,
+    terminationState$,
     join: localMembership.requestJoinAndPublish,
     leave: localMembership.requestDisconnect,
     toggleScreenSharing: toggleScreenSharing,

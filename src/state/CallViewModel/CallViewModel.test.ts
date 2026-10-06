@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Element Creations Ltd.
+Copyright 2025, 2026 Element Creations Ltd.
 Copyright 2024 New Vector Ltd.
 
 SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
@@ -42,6 +42,7 @@ import {
   type LivekitTransport,
 } from "matrix-js-sdk/lib/matrixrtc";
 import { deepCompare } from "matrix-js-sdk/lib/utils";
+import { EventStatus } from "matrix-js-sdk/lib/models/event";
 
 import { type Layout } from "../layout-types.ts";
 import {
@@ -79,11 +80,17 @@ import {
 import { MatrixRTCMode } from "../../config/ConfigOptions.ts";
 import { initializeWidget } from "../../widget.ts";
 import {
+  CallTerminationEventType,
   ElementCallTerminateEventType,
   type TerminationEvent,
 } from "../../callTermination";
 import { computeUrlParams } from "../../UrlParams.ts";
-import { callViewModelOptionsFromParams } from "./CallViewModel.ts";
+import {
+  type CallViewModel,
+  type CallViewModelOptions,
+  callViewModelOptionsFromParams,
+} from "./CallViewModel.ts";
+import { type HostRequest, nullHostBridge } from "../../HostBridge.ts";
 
 initializeWidget();
 
@@ -1623,6 +1630,261 @@ describe.each(modes)("CallViewModel (%s mode)", (mode) => {
       MatrixEventEvent.Decrypted,
       expect.any(Function),
     );
+  });
+
+  describe("call termination", () => {
+    test("sends once, waits for send success and leaves once", async () => {
+      const { vm, rtcSession } = createTerminationTestCall();
+      const pending = Promise.withResolvers<{ event_id: string }>();
+      vi.mocked(rtcSession.room.client.sendEvent).mockReturnValue(
+        pending.promise,
+      );
+      const onLeave = vi.fn();
+      vm.leave$.subscribe(onLeave);
+
+      const sending = vm.terminateCall();
+      await vm.terminateCall();
+      expect(vm.terminationState$.value).toBe("sending");
+      expect(rtcSession.room.client.sendEvent).toHaveBeenCalledOnce();
+      expect(rtcSession.room.client.sendEvent).toHaveBeenCalledWith(
+        rtcSession.room.roomId,
+        CallTerminationEventType,
+        {
+          [ElementCallTerminateEventType]: {
+            terminated_by: localRtcMember.userId,
+            timestamp: expect.any(Number),
+          },
+        },
+        expect.any(String),
+      );
+      expect(onLeave).not.toHaveBeenCalled();
+
+      pending.resolve({ event_id: "$sent" });
+      await sending;
+      vm.hangup();
+      await vm.terminateCall();
+      expect(onLeave).toHaveBeenCalledExactlyOnceWith("user");
+      expect(rtcSession.room.client.sendEvent).toHaveBeenCalledOnce();
+    });
+
+    test("failed send stays in the call and retries the same SDK event", async () => {
+      const { vm, rtcSession } = createTerminationTestCall();
+      const client = rtcSession.room.client;
+      const event = new MatrixEvent({});
+      event.setStatus(EventStatus.NOT_SENT);
+      vi.mocked(client.sendEvent).mockRejectedValue(
+        new Error("Network failure"),
+      );
+      vi.mocked(rtcSession.room.getEventForTxnId).mockReturnValue(event);
+      const states: string[] = [];
+      vm.terminationState$.subscribe((state) => states.push(state));
+      const onLeave = vi.fn();
+      vm.leave$.subscribe(onLeave);
+
+      await vm.terminateCall();
+      expect(vm.terminationState$.value).toBe("failed");
+      expect(onLeave).not.toHaveBeenCalled();
+      expect(rtcSession.room.getEventForTxnId).toHaveBeenCalledWith(
+        vi.mocked(client.sendEvent).mock.calls[0][3],
+      );
+
+      const resend = Promise.withResolvers<{ event_id: string }>();
+      vi.mocked(client.resendEvent).mockImplementation(async (failedEvent) => {
+        failedEvent.setStatus(EventStatus.SENDING);
+        return await resend.promise;
+      });
+      const retrying = vm.terminateCall();
+      await vm.terminateCall();
+      expect(client.resendEvent).toHaveBeenCalledExactlyOnceWith(
+        event,
+        rtcSession.room,
+      );
+      resend.resolve({ event_id: "$resent" });
+      await retrying;
+      expect(client.sendEvent).toHaveBeenCalledOnce();
+      expect(states).toEqual(["idle", "sending", "failed", "sending"]);
+      expect(onLeave).toHaveBeenCalledExactlyOnceWith("user");
+      expect(client.cancelPendingEvent).not.toHaveBeenCalled();
+    });
+
+    test("retries a pre-registration failure with a fresh send", async () => {
+      const { vm, rtcSession } = createTerminationTestCall();
+      const sendEvent = vi.mocked(rtcSession.room.client.sendEvent);
+      sendEvent.mockRejectedValueOnce(new Error("Not registered"));
+      await vm.terminateCall();
+      await vm.terminateCall();
+      expect(sendEvent).toHaveBeenCalledTimes(2);
+      expect(rtcSession.room.client.resendEvent).not.toHaveBeenCalled();
+    });
+
+    test("leaving after a failed send discards the unsent copy without resending", async () => {
+      const { vm, rtcSession, scope } = createTerminationTestCall();
+      const client = rtcSession.room.client;
+      const event = new MatrixEvent({});
+      event.setStatus(EventStatus.NOT_SENT);
+      vi.mocked(client.sendEvent).mockRejectedValue(new Error("Failed"));
+      vi.mocked(rtcSession.room.getEventForTxnId).mockReturnValue(event);
+      await vm.terminateCall();
+      vm.hangup();
+      scope.end();
+      await vm.terminateCall();
+      expect(client.cancelPendingEvent).toHaveBeenCalledExactlyOnceWith(event);
+      expect(client.sendEvent).toHaveBeenCalledOnce();
+      expect(client.resendEvent).not.toHaveBeenCalled();
+    });
+
+    test.each(["before", "after"])(
+      "own echo %s send success still leaves once",
+      async (echoOrder) => {
+        const termination$ = new Subject<TerminationEvent>();
+        const { vm, rtcSession } = createTerminationTestCall({
+          createTermination$: () => termination$,
+        });
+        const pending = Promise.withResolvers<{ event_id: string }>();
+        vi.mocked(rtcSession.room.client.sendEvent).mockReturnValue(
+          pending.promise,
+        );
+        const onLeave = vi.fn();
+        vm.leave$.subscribe(onLeave);
+        const sending = vm.terminateCall();
+        const echo = { terminatedBy: localRtcMember.userId, timestamp: 12345 };
+        if (echoOrder === "before") termination$.next(echo);
+        pending.resolve({ event_id: "$sent" });
+        await sending;
+        termination$.next(echo);
+        termination$.next({ ...echo, terminatedBy: aliceUserId });
+        vm.hangup();
+        expect(onLeave).toHaveBeenCalledOnce();
+        expect(onLeave).toHaveBeenCalledWith(
+          echoOrder === "before" ? "terminated" : "user",
+        );
+      },
+    );
+
+    test.each(["hangup", "scope end", "remote termination"])(
+      "%s during sending suppresses late settlement",
+      async (stop) => {
+        const termination$ = new Subject<TerminationEvent>();
+        const { vm, rtcSession, scope } = createTerminationTestCall({
+          createTermination$: () => termination$,
+        });
+        const pending = Promise.withResolvers<{ event_id: string }>();
+        vi.mocked(rtcSession.room.client.sendEvent).mockReturnValue(
+          pending.promise,
+        );
+        const onLeave = vi.fn();
+        vm.leave$.subscribe(onLeave);
+        const states: string[] = [];
+        vm.terminationState$.subscribe((state) => states.push(state));
+        const sending = vm.terminateCall();
+        if (stop === "scope end") scope.end();
+        else if (stop === "hangup") vm.hangup();
+        else termination$.next({ terminatedBy: aliceUserId, timestamp: 12345 });
+        pending.resolve({ event_id: "$sent" });
+        await sending;
+        expect(onLeave).toHaveBeenCalledTimes(stop === "scope end" ? 0 : 1);
+        expect(states).toEqual(["idle", "sending"]);
+      },
+    );
+
+    test.each(["hangup", "scope end"])(
+      "late send failure after %s discards the unsent event without changing state",
+      async (stop) => {
+        const { vm, rtcSession, scope } = createTerminationTestCall();
+        const client = rtcSession.room.client;
+        const pending = Promise.withResolvers<{ event_id: string }>();
+        vi.mocked(client.sendEvent).mockReturnValue(pending.promise);
+        const event = new MatrixEvent({});
+        event.setStatus(EventStatus.SENDING);
+        vi.mocked(rtcSession.room.getEventForTxnId).mockReturnValue(event);
+        const onLeave = vi.fn();
+        vm.leave$.subscribe(onLeave);
+        const sending = vm.terminateCall();
+        if (stop === "scope end") scope.end();
+        else vm.hangup();
+        expect(client.cancelPendingEvent).not.toHaveBeenCalled();
+        event.setStatus(EventStatus.NOT_SENT);
+        pending.reject(new Error("Late failure"));
+        await sending;
+        expect(vm.terminationState$.value).toBe("sending");
+        expect(onLeave).toHaveBeenCalledTimes(stop === "scope end" ? 0 : 1);
+        expect(client.cancelPendingEvent).toHaveBeenCalledExactlyOnceWith(
+          event,
+        );
+      },
+    );
+
+    test.each(["user", "host", "terminated"])(
+      "retains an early %s leave for late subscribers and notifies the host once",
+      (reason) => {
+        const termination$ = new Subject<TerminationEvent>();
+        const hangUp$ = new Subject<HostRequest<Record<string, never>>>();
+        const hostBridge = {
+          ...nullHostBridge,
+          hangUp$,
+          notifyHungUp: vi.fn().mockResolvedValue(undefined),
+        };
+        const { vm } = createTerminationTestCall({
+          hostBridge,
+          createTermination$: () => termination$,
+        });
+        vm.join();
+        if (reason === "user") vm.hangup();
+        else if (reason === "host") hangUp$.next({ data: {}, reply: vi.fn() });
+        else termination$.next({ terminatedBy: aliceUserId, timestamp: 12345 });
+        const onLeave = vi.fn();
+        vm.leave$.subscribe(onLeave);
+        vm.leave$.subscribe(onLeave);
+        vm.hangup();
+        expect(onLeave).toHaveBeenCalledTimes(2);
+        expect(onLeave).toHaveBeenNthCalledWith(
+          1,
+          reason === "host" ? "user" : reason,
+        );
+        expect(hostBridge.notifyHungUp).toHaveBeenCalledOnce();
+      },
+    );
+
+    test("retains a termination emitted synchronously during construction", () => {
+      const { vm } = createTerminationTestCall({
+        createTermination$: () =>
+          of({ terminatedBy: aliceUserId, timestamp: 12345 }),
+      });
+      const onLeave = vi.fn();
+      vm.leave$.subscribe(onLeave);
+      expect(onLeave).toHaveBeenCalledExactlyOnceWith("terminated");
+    });
+
+    function createTerminationTestCall(
+      options: Partial<CallViewModelOptions> = {},
+    ): {
+      vm: CallViewModel;
+      rtcSession: MockRTCSession;
+      scope: ObservableScope;
+    } {
+      let result!: {
+        vm: CallViewModel;
+        rtcSession: MockRTCSession;
+        scope: ObservableScope;
+      };
+      withCallViewModel(
+        {},
+        (vm, rtcSession, _subjects, _setSyncState, scope) => {
+          const client = rtcSession.room.client;
+          client.sendEvent = vi.fn().mockResolvedValue({ event_id: "$sent" });
+          client.resendEvent = vi
+            .fn()
+            .mockResolvedValue({ event_id: "$resent" });
+          client.cancelPendingEvent = vi.fn((event) =>
+            event.setStatus(EventStatus.CANCELLED),
+          );
+          rtcSession.room.getEventForTxnId = vi.fn().mockReturnValue(undefined);
+          result = { vm, rtcSession, scope };
+        },
+        options,
+      );
+      return result;
+    }
   });
 
   test("autoLeave$ emits only when autoLeaveWhenOthersLeft option is enabled", () => {

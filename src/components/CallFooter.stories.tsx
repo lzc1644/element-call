@@ -188,6 +188,7 @@ export const Default: Story = {
     videoBlurEnabled: true,
     hangup: fn(),
     terminateCall: fn(),
+    terminationState: "idle",
     notifyControlInteraction: undefined,
     participantCount: 3,
     theme: "dark",

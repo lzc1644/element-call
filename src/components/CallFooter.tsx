@@ -14,6 +14,8 @@ import {
 } from "react";
 
 import classNames from "classnames";
+import { Alert, Button } from "@vector-im/compound-web";
+import { useTranslation } from "react-i18next";
 
 import LogoMark from "../icons/LogoMark.svg?react";
 import LogoType from "../icons/LogoType.svg?react";
@@ -39,6 +41,7 @@ import { type ViewModel } from "../state/ViewModel";
 import { useBehavior } from "../useBehavior";
 import { type LayoutSwitchViewModel } from "../state/LayoutSwitchViewModel";
 import { LayoutSwitch } from "../room/LayoutSwitch";
+import { type CallTerminationState } from "../state/CallViewModel/CallViewModel";
 
 export interface AudioOutputSwitcher {
   targetOutput: string;
@@ -104,6 +107,7 @@ export interface FooterState {
   reactionIdentifier: string | undefined;
   reactionData: ReactionData | undefined;
   participantCount: number;
+  terminationState: CallTerminationState;
 
   // debug stuff
   debugTileLayout: boolean;
@@ -131,6 +135,7 @@ export const CallFooter: FC<FooterProps> = ({
   children,
   vm,
 }) => {
+  const { t } = useTranslation();
   const asOverlay = useBehavior(vm.asOverlay$);
   const showFooter = useBehavior(vm.showFooter$);
   const hideControls = useBehavior(vm.hideControls$);
@@ -150,6 +155,7 @@ export const CallFooter: FC<FooterProps> = ({
   const audioOutputSwitcher = useBehavior(vm.audioOutputSwitcher$);
   const hangup = useBehavior(vm.hangup$);
   const terminateCall = useBehavior(vm.terminateCall$);
+  const terminationState = useBehavior(vm.terminationState$);
   const notifyControlInteraction = useBehavior(vm.notifyControlInteraction$);
   const participantCount = useBehavior(vm.participantCount$);
   const debugTileLayout = useBehavior(vm.debugTileLayout$);
@@ -286,7 +292,7 @@ export const CallFooter: FC<FooterProps> = ({
 
   if (audioOutputButton) buttons.push(audioOutputButton);
 
-  if (hangup && terminateCall)
+  if (hangup && (terminateCall || terminationState !== "idle"))
     buttons.push(
       <EndCallMenuButton
         key="end_call"
@@ -336,11 +342,40 @@ export const CallFooter: FC<FooterProps> = ({
       })}
     >
       <div
-        className={styles.toolbar}
+        className={classNames(styles.toolbar, {
+          [styles.withTerminationStatus]: terminationState !== "idle",
+        })}
         onPointerDown={notifyControlInteraction}
         onPointerUp={stopPointerUpPropagation}
         onFocusCapture={notifyControlInteraction}
       >
+        {!hideControls && terminationState !== "idle" && (
+          <div
+            className={styles.terminationStatus}
+            role={terminationState === "failed" ? "alert" : "status"}
+          >
+            <Alert
+              type={terminationState === "failed" ? "critical" : "info"}
+              title={
+                terminationState === "failed"
+                  ? t("terminate_call_failed")
+                  : t("terminate_call_sending")
+              }
+              actions={
+                terminationState === "failed" && (
+                  <>
+                    <Button size="md" kind="secondary" onClick={terminateCall}>
+                      {t("terminate_call_retry")}
+                    </Button>
+                    <Button size="md" kind="tertiary" onClick={hangup}>
+                      {t("leave_call_button")}
+                    </Button>
+                  </>
+                )
+              }
+            />
+          </div>
+        )}
         <div className={styles.settingsLogoContainer}>
           {openSettings !== undefined && (
             <SettingsIconButton
