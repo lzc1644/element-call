@@ -27,6 +27,7 @@ import { BrowserRouter } from "react-router-dom";
 import { TooltipProvider } from "@vector-im/compound-web";
 import { RoomContext, useLocalParticipant } from "@livekit/components-react";
 import userEvent from "@testing-library/user-event";
+import useMeasure from "react-use-measure";
 
 import { ActiveCall, InCallView } from "./InCallView";
 import {
@@ -88,7 +89,7 @@ vi.mock("livekit-client/e2ee-worker?worker");
 vi.mock("../e2ee/sharedKeyManagement");
 vi.mock("../livekit/MatrixAudioRenderer");
 vi.mock("react-use-measure", () => ({
-  default: (): [() => void, object] => [(): void => {}, {}],
+  default: vi.fn(() => [(): void => {}, {}]),
 }));
 
 const localRtcMember = mockRtcMembership("@carol:example.org", "CCCC");
@@ -127,6 +128,11 @@ function pointerEvent(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(useMeasure).mockReturnValue([
+    (): void => {},
+    {} as ReturnType<typeof useMeasure>[1],
+    (): void => {},
+  ]);
 
   // MatrixAudioRenderer is tested separately.
   (
@@ -153,6 +159,8 @@ interface CreateInCallViewArgs {
   callViewModelOptions?: Partial<CallViewModelOptions>;
   /** If true, wraps the rendered tree in an AppBar provider */
   withAppBar?: boolean;
+  root?: HTMLElement;
+  footerVisibility$?: BehaviorSubject<boolean>;
 }
 function createInCallView(args: CreateInCallViewArgs = {}): RenderResult & {
   rtcSession: MockRTCSession;
@@ -186,7 +194,10 @@ function createInCallView(args: CreateInCallViewArgs = {}): RenderResult & {
       rtcSession={rtcSession.asMockedSession()}
       muteStates={muteState}
       vm={vm}
-      footerVm={footerVm}
+      footerVm={{
+        ...footerVm,
+        showFooter$: args.footerVisibility$ ?? footerVm.showFooter$,
+      }}
       developerSettingsVm={developerSettingsVm}
       matrixInfo={matrixInfo}
       matrixRoom={room}
@@ -204,7 +215,9 @@ function createInCallView(args: CreateInCallViewArgs = {}): RenderResult & {
           rtcSession={rtcSession.asMockedSession()}
         >
           <TooltipProvider>
-            <RoomContext value={livekitRoom}>{content}</RoomContext>
+            <RootElementProvider value={args.root ?? null}>
+              <RoomContext value={livekitRoom}>{content}</RoomContext>
+            </RootElementProvider>
           </TooltipProvider>
         </ReactionsSenderProvider>
       </MediaDevicesContext>
@@ -261,6 +274,51 @@ describe("InCallView", () => {
         vi.mocked(SpotlightTile).mockReset();
       }
     });
+  });
+
+  describe("floating footer scroll clearance", () => {
+    it.each(["android", "ios", "desktop"])(
+      "%s exposes requested footer visibility without losing measured focus clearance",
+      (platform) => {
+        vi.mocked(useMeasure).mockReturnValue([
+          (): void => {},
+          { width: 390, height: 80 } as ReturnType<typeof useMeasure>[1],
+          (): void => {},
+        ]);
+        const root = document.createElement("div");
+        root.dataset.platform = platform;
+        const footerVisibility$ = new BehaviorSubject(true);
+        const { container } = createInCallView({
+          root,
+          footerVisibility$,
+          initialRtcMemberships: [
+            localFixtureRtcMember,
+            aliceRtcMember,
+            bobRtcMember,
+          ],
+        });
+        const media = container.querySelector(
+          `.${styles.media}`,
+        ) as HTMLElement;
+        expect(media.style.getPropertyValue("--call-footer-height")).toBe(
+          "80px",
+        );
+        const footer = container.querySelector(
+          '[data-testid="footer-container"]',
+        )!;
+        expect(footer).toHaveAttribute("data-controls-visible", "true");
+        act(() => footerVisibility$.next(false));
+        expect(footer).toHaveAttribute("data-controls-visible", "false");
+        expect(media.style.getPropertyValue("--call-footer-height")).toBe(
+          "80px",
+        );
+        act(() => footerVisibility$.next(true));
+        expect(footer).toHaveAttribute("data-controls-visible", "true");
+        expect(media.style.getPropertyValue("--call-footer-height")).toBe(
+          "80px",
+        );
+      },
+    );
   });
 
   describe("member visibility", () => {
