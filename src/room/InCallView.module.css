@@ -104,6 +104,12 @@ Keep the expanded picture unobscured when members are explicitly hidden. */
   inset: 0;
 }
 
+/* PiP renders its tile directly, without a Grid to assign its dimensions. */
+.inRoom[data-layout="pip"] .media > .tile {
+  position: absolute;
+  inset: 0;
+}
+
 .scrollingGrid[data-scrollable="true"] {
   inset-block-end: var(--call-footer-height);
   pointer-events: auto;

@@ -60,9 +60,6 @@ widgetTest("Put call in PIP", async ({ addUser, browserName }) => {
   await expect(valere.page.getByTestId("widget-pip-container")).toBeVisible();
 
   {
-    // wait a bit so that the PIP has rendered the video
-    await valere.page.waitForTimeout(600);
-
     // Check for a bug where the video had the wrong fit in PIP
     const frame = valere.page
       .locator('iframe[title="Element Call"]')
@@ -73,6 +70,12 @@ widgetTest("Put call in PIP", async ({ addUser, browserName }) => {
     const videoElements = await frame.locator("video").all();
 
     const pipVideo = videoElements[0];
+    await expect(pipVideo).toBeVisible();
+    await expect
+      .poll(async () =>
+        pipVideo.evaluate((video: HTMLVideoElement) => video.readyState),
+      )
+      .toBeGreaterThanOrEqual(2);
     await expect(pipVideo).toHaveCSS("object-fit", "cover");
   }
 });
