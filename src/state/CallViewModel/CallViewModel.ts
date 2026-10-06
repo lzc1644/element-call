@@ -1097,34 +1097,22 @@ export function createCallViewModel$(
   );
 
   const spotlightAndPip$ = scope.behavior<{
-    /** Media that determines layout and screen-share state. */
     spotlight: MediaViewModel[];
-    /** Media rendered by the spotlight carousel. */
-    spotlightMedia: MediaViewModel[];
     pip$: Observable<UserMediaViewModel | undefined>;
   }>(
     ringingMedia$.pipe(
       switchMap((ringingMedia) => {
         if (ringingMedia !== null)
-          return of({
-            spotlight: [ringingMedia],
-            spotlightMedia: [ringingMedia],
-            pip$: localUserMediaForPip$,
-          });
+          return of({ spotlight: [ringingMedia], pip$: localUserMediaForPip$ });
 
-        return combineLatest([screenShares$, userMedia$]).pipe(
-          switchMap(([screenShares, userMedia]) => {
+        return screenShares$.pipe(
+          switchMap((screenShares) => {
             if (screenShares.length > 0)
-              return of({
-                spotlight: screenShares,
-                spotlightMedia: spotlightCarouselMedia(userMedia, screenShares),
-                pip$: spotlightSpeaker$,
-              });
+              return of({ spotlight: screenShares, pip$: spotlightSpeaker$ });
 
             return spotlightSpeaker$.pipe(
               map((speaker) => ({
                 spotlight: speaker ? [speaker] : [],
-                spotlightMedia: speaker ? [speaker] : [],
                 // Hide PiP if redundant (i.e. if local user is already in spotlight)
                 pip$: localUserMediaForPip$.pipe(
                   map((m) => (m === speaker ? undefined : m)),
@@ -1140,13 +1128,6 @@ export function createCallViewModel$(
   const spotlight$ = scope.behavior<MediaViewModel[]>(
     spotlightAndPip$.pipe(
       map(({ spotlight }) => spotlight),
-      distinctUntilChanged<MediaViewModel[]>(shallowArrayEquals),
-    ),
-  );
-
-  const spotlightMedia$ = scope.behavior<MediaViewModel[]>(
-    spotlightAndPip$.pipe(
-      map(({ spotlightMedia }) => spotlightMedia),
       distinctUntilChanged<MediaViewModel[]>(shallowArrayEquals),
     ),
   );
@@ -1200,15 +1181,12 @@ export function createCallViewModel$(
   );
 
   const gridLayoutMedia$: Observable<GridLayoutMedia> = combineLatest(
-    [grid$, spotlight$, spotlightMedia$],
-    (grid, spotlight, spotlightMedia) => ({
+    [grid$, spotlight$],
+    (grid, spotlight) => ({
       type: "grid",
       edgeToEdge: false,
       spotlight: spotlight.some((vm) => vm.type === "screen share")
         ? spotlight
-        : undefined,
-      spotlightMedia: spotlight.some((vm) => vm.type === "screen share")
-        ? spotlightMedia
         : undefined,
       grid,
     }),
@@ -1217,40 +1195,31 @@ export function createCallViewModel$(
   const spotlightLandscapeLayoutMedia$ = (
     edgeToEdge: boolean,
   ): Observable<SpotlightLandscapeLayoutMedia> =>
-    combineLatest(
-      [grid$, spotlight$, spotlightMedia$],
-      (grid, spotlight, spotlightMedia) => ({
-        type: "spotlight-landscape",
-        edgeToEdge,
-        spotlight,
-        spotlightMedia,
-        grid,
-      }),
-    );
+    combineLatest([grid$, spotlight$], (grid, spotlight) => ({
+      type: "spotlight-landscape",
+      edgeToEdge,
+      spotlight,
+      grid,
+    }));
 
   const spotlightPortraitLayoutMedia$: Observable<SpotlightPortraitLayoutMedia> =
-    combineLatest(
-      [grid$, spotlight$, spotlightMedia$],
-      (grid, spotlight, spotlightMedia) => ({
-        type: "spotlight-portrait",
-        edgeToEdge: false,
-        spotlight,
-        spotlightMedia,
-        grid,
-      }),
-    );
+    combineLatest([grid$, spotlight$], (grid, spotlight) => ({
+      type: "spotlight-portrait",
+      edgeToEdge: false,
+      spotlight,
+      grid,
+    }));
 
   const spotlightExpandedLayoutMedia$ = (
     edgeToEdge: boolean,
   ): Observable<SpotlightExpandedLayoutMedia> =>
     spotlightAndPip$.pipe(
-      switchMap(({ spotlight, spotlightMedia, pip$ }) =>
+      switchMap(({ spotlight, pip$ }) =>
         pip$.pipe(
           map((pip) => ({
             type: "spotlight-expanded" as const,
             edgeToEdge,
             spotlight,
-            spotlightMedia,
             pip: pip ?? undefined,
           })),
         ),
@@ -1333,14 +1302,12 @@ export function createCallViewModel$(
       }),
     );
 
-  const pipLayoutMedia$: Observable<LayoutMedia> = combineLatest(
-    [spotlight$, spotlightMedia$],
-    (spotlight, spotlightMedia) => ({
+  const pipLayoutMedia$: Observable<LayoutMedia> = spotlight$.pipe(
+    map((spotlight) => ({
       type: "pip",
       edgeToEdge: platform !== "desktop",
       spotlight,
-      spotlightMedia,
-    }),
+    })),
   );
 
   spotlight$
@@ -2029,28 +1996,6 @@ export function createCallViewModel$(
     screenShareError$: localMembership.screenShareError$,
     dismissScreenShareError: localMembership.dismissScreenShareError,
   };
-}
-
-function spotlightCarouselMedia(
-  userMedia: UserMediaViewModel[],
-  screenShares: ScreenShareViewModel[],
-): MediaViewModel[] {
-  const userMediaById = new Map(userMedia.map((media) => [media.id, media]));
-  const screenShareSuffix = ":screen-share";
-
-  return screenShares.flatMap((screenShare) => {
-    // Screen-share ids are derived from the exact user-media id. Requiring both
-    // the id and user id keeps a share paired with its participant/device
-    // instead of accidentally selecting another device for the same user.
-    const cameraId = screenShare.id.endsWith(screenShareSuffix)
-      ? screenShare.id.slice(0, -screenShareSuffix.length)
-      : undefined;
-    const camera =
-      cameraId === undefined ? undefined : userMediaById.get(cameraId);
-    return camera?.userId === screenShare.userId
-      ? [screenShare, camera]
-      : [screenShare];
-  });
 }
 
 function getE2eeKeyProvider(

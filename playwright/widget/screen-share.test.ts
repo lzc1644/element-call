@@ -96,8 +96,8 @@ widgetTest("Sharing screen in group call", async ({ addUser, browserName }) => {
       .locator('iframe[title="Element Call"]')
       .contentFrame();
 
-    // Three grid cameras plus the share and its paired carousel camera.
-    await expect(frame.locator("video")).toHaveCount(5, {
+    // Three participant cameras plus one screen share, with no duplicate camera.
+    await expect(frame.locator("video")).toHaveCount(4, {
       timeout: 5000,
     });
 
@@ -114,29 +114,27 @@ widgetTest("Sharing screen in group call", async ({ addUser, browserName }) => {
     await expect(frame.getByRole("radio", { name: "Grid" })).toBeChecked();
   }
 
-  // A remote screen share keeps the share-driven spotlight layout, while the
-  // spotlight tile also exposes the same participant's camera as its next
-  // carousel candidate. Scope to aria-hidden spotlight items so the camera's
-  // separate grid tile cannot satisfy these assertions.
+  // The spotlight only contains shares; cameras remain in the participant rail.
   const carolFrame = carol.page
     .locator('iframe[title="Element Call"]')
     .contentFrame();
   const spotlightItems = carolFrame.locator("[data-id][aria-hidden]");
-  await expect(spotlightItems).toHaveCount(2);
+  await expect(spotlightItems).toHaveCount(1);
   const spotlightShare = spotlightItems.filter({
     has: carolFrame.locator('video[data-lk-source="screen_share"]'),
   });
-  const spotlightCamera = spotlightItems.filter({
-    has: carolFrame.locator('video[data-lk-source="camera"]'),
-  });
   await expect(spotlightShare).toHaveAttribute("aria-hidden", "false");
-  await expect(spotlightCamera).toHaveAttribute("aria-hidden", "true");
-  await carolFrame.getByRole("button", { name: "Next" }).click();
-  await expect(spotlightCamera).toHaveAttribute("aria-hidden", "false");
+  await expect(
+    spotlightItems.locator('video[data-lk-source="camera"]'),
+  ).toHaveCount(0);
+  await expect(
+    carolFrame.locator('video[data-lk-source="camera"]'),
+  ).toHaveCount(3);
+  await expect(
+    carolFrame.getByRole("button", { name: "Next" }),
+  ).not.toBeVisible();
 
-  // Moving to another room puts the call in a floating PiP. Both carousel
-  // candidates must keep a real visible video area, not just a mounted <video>.
-  await carolFrame.getByRole("button", { name: "Back", exact: true }).click();
+  // Moving to another room puts the share in a floating PiP with a real video area.
   await TestHelpers.createRoom("Other Room", carol.page);
   await expect(carol.page.getByTestId("widget-pip-container")).toBeVisible();
   await expect(carolFrame.locator("[data-layout]")).toHaveAttribute(
@@ -144,21 +142,15 @@ widgetTest("Sharing screen in group call", async ({ addUser, browserName }) => {
     "pip",
   );
   const pipShare = spotlightShare.locator("video");
-  const pipCamera = spotlightCamera.locator("video");
   await expect(pipShare).toBeVisible();
   await expect
     .poll(async () =>
       pipShare.evaluate((video: HTMLVideoElement) => video.readyState),
     )
     .toBeGreaterThanOrEqual(2);
-  await carolFrame.getByRole("button", { name: "Next", exact: true }).click();
-  await expect(spotlightCamera).toHaveAttribute("aria-hidden", "false");
-  await expect(pipCamera).toBeVisible();
-  await expect
-    .poll(async () =>
-      pipCamera.evaluate((video: HTMLVideoElement) => video.readyState),
-    )
-    .toBeGreaterThanOrEqual(2);
+  await expect(
+    carolFrame.locator('video[data-lk-source="camera"]'),
+  ).toHaveCount(0);
   await TestHelpers.expandRoomList(carol.page);
   await TestHelpers.switchToRoomNamed(carol.page, roomName);
   await expect(carolFrame.locator("[data-layout]")).not.toHaveAttribute(
@@ -212,8 +204,8 @@ widgetTest("Sharing screen in group call", async ({ addUser, browserName }) => {
       await expect(
         frame.getByTestId("videoTile").filter({ visible: true }),
       ).toHaveCount(1);
-      // The carousel retains Alice's share and camera, plus the hidden PiP.
-      await expect(frame.getByTestId("videoTile")).toHaveCount(3);
+      // The spotlight retains Alice's share, plus the hidden speaker PiP.
+      await expect(frame.getByTestId("videoTile")).toHaveCount(2);
       await expect(share).toBeVisible();
 
       await frame
@@ -235,8 +227,8 @@ widgetTest("Sharing screen in group call", async ({ addUser, browserName }) => {
       .locator('iframe[title="Element Call"]')
       .contentFrame();
 
-    // Three grid cameras and two share/camera carousel pairs.
-    await expect(frame.locator("video")).toHaveCount(7, {
+    // Three participant cameras and two screen shares.
+    await expect(frame.locator("video")).toHaveCount(5, {
       timeout: 5000,
     });
 
@@ -244,8 +236,12 @@ widgetTest("Sharing screen in group call", async ({ addUser, browserName }) => {
       frame.locator('video[data-lk-source="screen_share"]'),
     ).toHaveCount(2);
 
-    // Each share is followed by its camera in the carousel.
-    await expect(frame.getByTestId("screenshare-indicator")).toHaveCount(4);
+    // Each indicator represents a shared screen, never a camera.
+    await expect(frame.getByTestId("screenshare-indicator")).toHaveCount(2);
+    await expect(spotlightItems).toHaveCount(2);
+    await expect(
+      spotlightItems.locator('video[data-lk-source="camera"]'),
+    ).toHaveCount(0);
 
     // Check the first indicator is visible
     await expect(
@@ -265,9 +261,24 @@ widgetTest("Sharing screen in group call", async ({ addUser, browserName }) => {
       frame.getByTestId("screenshare-indicator").first(),
     ).toHaveAttribute("data-visible", "false");
 
-    // There should be a prev button now
+    // There should be a prev button now, but no third (camera) page.
     await expect(frame.getByRole("button", { name: "Back" })).toBeVisible();
+    await expect(frame.getByRole("button", { name: "Next" })).not.toBeVisible();
+    const visibleShare = spotlightItems
+      .locator('video[data-lk-source="screen_share"]')
+      .filter({ visible: true });
+    await expect(visibleShare).toHaveCount(1);
+    await expect(
+      frame.locator('video[data-lk-source="camera"]').filter({ visible: true }),
+    ).toHaveCount(3);
 
-    // await carol.page.pause();
+    // Stop Bob's selected share; the carousel should return to Alice's share.
+    await toggleScreenSharing(bob.page);
+    await expect(spotlightItems).toHaveCount(1);
+    await expect(spotlightItems).toHaveAttribute("aria-hidden", "false");
+    await expect(frame.getByRole("button", { name: "Next" })).not.toBeVisible();
+    await expect(
+      frame.locator('video[data-lk-source="camera"]').filter({ visible: true }),
+    ).toHaveCount(3);
   }
 });

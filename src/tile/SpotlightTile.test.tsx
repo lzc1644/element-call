@@ -106,9 +106,9 @@ test("SpotlightTile is accessible", async () => {
   expect(toggleExpanded).toHaveBeenCalled();
 });
 
-test("SpotlightTile falls back to the camera when its share stops", () => {
-  const camera = mockRemoteMedia(
-    mockRtcMembership("@alice:example.org", "AAAA"),
+test("SpotlightTile falls back to the remaining share when the visible share stops", () => {
+  const remainingShare = mockRemoteScreenShare(
+    mockRtcMembership("@bob:example.org", "BBBB"),
     {},
     mockRemoteParticipant({}),
   );
@@ -117,7 +117,7 @@ test("SpotlightTile falls back to the camera when its share stops", () => {
     {},
     mockRemoteParticipant({}),
   );
-  const media$ = new BehaviorSubject([share, camera]);
+  const media$ = new BehaviorSubject([share, remainingShare]);
 
   const { container } = render(
     <SpotlightTile
@@ -140,11 +140,14 @@ test("SpotlightTile falls back to the camera when its share stops", () => {
     />,
   );
 
-  const cameraItem = container.querySelector(`[data-id="${camera.id}"]`)!;
-  expect(cameraItem).toHaveAttribute("aria-hidden", "true");
+  const remainingItem = container.querySelector(
+    `[data-id="${remainingShare.id}"]`,
+  )!;
+  expect(remainingItem).toHaveAttribute("aria-hidden", "true");
 
-  act(() => media$.next([camera]));
-  expect(cameraItem).not.toHaveAttribute("aria-hidden", "true");
+  act(() => media$.next([remainingShare]));
+  expect(remainingItem).toHaveAttribute("aria-hidden", "false");
+  expect(container.querySelector(`[data-id="${share.id}"]`)).toBeNull();
 });
 
 test("Screen share volume UI is shown when screen share has audio", async () => {

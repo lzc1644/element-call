@@ -28,14 +28,6 @@ debugTileLayout.value$.subscribe((value) => (DEBUG_ENABLED = value));
 
 class SpotlightTileData {
   private readonly scope = new ObservableScope();
-  private readonly layoutMedia$: BehaviorSubject<MediaViewModel[]>;
-  public get layoutMedia(): MediaViewModel[] {
-    return this.layoutMedia$.value;
-  }
-  public set layoutMedia(value: MediaViewModel[]) {
-    this.layoutMedia$.next(value);
-  }
-
   private readonly media$: BehaviorSubject<MediaViewModel[]>;
   public get media(): MediaViewModel[] {
     return this.media$.value;
@@ -64,12 +56,10 @@ class SpotlightTileData {
 
   public constructor(
     scope: ObservableScope,
-    layoutMedia: MediaViewModel[],
     media: MediaViewModel[],
     maximised: boolean,
     background: SpotlightBackground,
   ) {
-    this.layoutMedia$ = new BehaviorSubject(layoutMedia);
     this.media$ = new BehaviorSubject(media);
     this.maximised$ = new BehaviorSubject(maximised);
     this.background$ = new BehaviorSubject(background);
@@ -80,7 +70,6 @@ class SpotlightTileData {
       this.media$,
       this.maximised$,
       this.background$,
-      this.layoutMedia$,
     );
   }
 
@@ -159,9 +148,9 @@ export class TileStore {
 export class TileStoreBuilder {
   private spotlight: SpotlightTileData | null = null;
   private readonly prevSpotlightSpeaker: UserMediaViewModel | null =
-    this.prevSpotlight?.layoutMedia.length === 1 &&
-    "speaking$" in this.prevSpotlight.layoutMedia[0]
-      ? this.prevSpotlight.layoutMedia[0]
+    this.prevSpotlight?.media.length === 1 &&
+    "speaking$" in this.prevSpotlight.media[0]
+      ? this.prevSpotlight.media[0]
       : null;
 
   private readonly prevGridByMedia: Map<
@@ -206,9 +195,7 @@ export class TileStoreBuilder {
     media: MediaViewModel[],
     maximised: boolean,
     background: SpotlightBackground = "solid",
-    spotlightMedia?: MediaViewModel[],
   ): void {
-    const carouselMedia = spotlightMedia ?? media;
     if (DEBUG_ENABLED)
       logger.debug(
         `[TileStore, ${this.generation}] register spotlight: ${media.map((m) => m.displayName$.value)}`,
@@ -223,14 +210,12 @@ export class TileStoreBuilder {
       this.spotlight = new SpotlightTileData(
         this.scope,
         media,
-        carouselMedia,
         maximised,
         background,
       );
     } else {
       this.spotlight = this.prevSpotlight;
-      this.spotlight.layoutMedia = media;
-      this.spotlight.media = carouselMedia;
+      this.spotlight.media = media;
       this.spotlight.maximised = maximised;
       this.spotlight.background = background;
     }
@@ -253,7 +238,7 @@ export class TileStoreBuilder {
       // spotlight and the grid, so they're filtered out here
       if (
         !(media.type === "user" && media.local) &&
-        this.spotlight.layoutMedia.includes(media)
+        this.spotlight.media.includes(media)
       )
         return;
       // When the spotlight speaker changes, we would see one grid tile appear
@@ -262,12 +247,12 @@ export class TileStoreBuilder {
       // the media out, so it can remain where it is in the layout.
       if (
         media === this.prevSpotlightSpeaker &&
-        this.spotlight.layoutMedia.length === 1 &&
-        "speaking$" in this.spotlight.layoutMedia[0] &&
+        this.spotlight.media.length === 1 &&
+        "speaking$" in this.spotlight.media[0] &&
         this.prevSpotlightSpeaker !==
-          (this.spotlight.layoutMedia[0] satisfies UserMediaViewModel)
+          (this.spotlight.media[0] satisfies UserMediaViewModel)
       ) {
-        const prev = this.prevGridByMedia.get(this.spotlight.layoutMedia[0]);
+        const prev = this.prevGridByMedia.get(this.spotlight.media[0]);
         if (prev !== undefined) {
           const [entry, prevIndex] = prev;
           const previouslyVisible = prevIndex < this.visibleTiles;
@@ -279,7 +264,7 @@ export class TileStoreBuilder {
             this.stationaryGridEntries[prevIndex] = entry;
             // Do the media swap
             entry.media = media;
-            this.prevGridByMedia.delete(this.spotlight.layoutMedia[0]);
+            this.prevGridByMedia.delete(this.spotlight.media[0]);
             this.prevGridByMedia.set(media, prev);
           } else {
             // Create a new tile; this will cause a layout shift but I'm not
