@@ -66,6 +66,7 @@ import { initializeWidget } from "../widget";
 import { RootElementProvider } from "../RootElementContext";
 import { constant } from "../state/Behavior";
 import styles from "./InCallView.module.css";
+import { SpotlightTile } from "../tile/SpotlightTile";
 
 initializeWidget();
 vi.hoisted(
@@ -221,6 +222,44 @@ describe("InCallView", () => {
     it("renders", () => {
       const { container } = createInCallView();
       expect(container).toMatchSnapshot();
+    });
+
+    it("renders the PiP tile in the media area when the host shrinks the call", () => {
+      const windowSize$ = new BehaviorSubject({ width: 1000, height: 800 });
+      vi.mocked(SpotlightTile).mockImplementation(({ className }) => (
+        <div className={className} data-testid="pip-tile" />
+      ));
+      try {
+        const { vm, container, getByTestId, queryByTestId } = createInCallView({
+          callViewModelOptions: { windowSize$ },
+        });
+        const call = container.querySelector("[data-layout]")!;
+        expect(call).not.toHaveAttribute("data-layout", "pip");
+
+        for (let cycle = 0; cycle < 2; cycle++) {
+          act(() => windowSize$.next({ width: 300, height: 300 }));
+          expect(call).toHaveAttribute("data-layout", "pip");
+          expect(call.querySelector(`.${styles.media} > .${styles.tile}`)).toBe(
+            getByTestId("pip-tile"),
+          );
+          expect(call.querySelector(`.${styles.fixedGrid}`)).toBeNull();
+          const layout = vm.layout$.value;
+          expect(layout.type).toBe("pip");
+          if (layout.type !== "pip") throw new Error("Expected PiP layout");
+          expect(vi.mocked(SpotlightTile).mock.lastCall![0]).toMatchObject({
+            vm: layout.spotlight,
+            expanded: true,
+            showIndicators: false,
+          });
+
+          act(() => windowSize$.next({ width: 1000, height: 800 }));
+          expect(call).not.toHaveAttribute("data-layout", "pip");
+          expect(queryByTestId("pip-tile")).not.toBeInTheDocument();
+          expect(call.querySelector(`.${styles.fixedGrid}`)).not.toBeNull();
+        }
+      } finally {
+        vi.mocked(SpotlightTile).mockReset();
+      }
     });
   });
 

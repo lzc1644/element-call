@@ -134,6 +134,38 @@ widgetTest("Sharing screen in group call", async ({ addUser, browserName }) => {
   await carolFrame.getByRole("button", { name: "Next" }).click();
   await expect(spotlightCamera).toHaveAttribute("aria-hidden", "false");
 
+  // Moving to another room puts the call in a floating PiP. Both carousel
+  // candidates must keep a real visible video area, not just a mounted <video>.
+  await carolFrame.getByRole("button", { name: "Back", exact: true }).click();
+  await TestHelpers.createRoom("Other Room", carol.page);
+  await expect(carol.page.getByTestId("widget-pip-container")).toBeVisible();
+  await expect(carolFrame.locator("[data-layout]")).toHaveAttribute(
+    "data-layout",
+    "pip",
+  );
+  const pipShare = spotlightShare.locator("video");
+  const pipCamera = spotlightCamera.locator("video");
+  await expect(pipShare).toBeVisible();
+  await expect
+    .poll(async () =>
+      pipShare.evaluate((video: HTMLVideoElement) => video.readyState),
+    )
+    .toBeGreaterThanOrEqual(2);
+  await carolFrame.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(spotlightCamera).toHaveAttribute("aria-hidden", "false");
+  await expect(pipCamera).toBeVisible();
+  await expect
+    .poll(async () =>
+      pipCamera.evaluate((video: HTMLVideoElement) => video.readyState),
+    )
+    .toBeGreaterThanOrEqual(2);
+  await TestHelpers.expandRoomList(carol.page);
+  await TestHelpers.switchToRoomNamed(carol.page, roomName);
+  await expect(carolFrame.locator("[data-layout]")).not.toHaveAttribute(
+    "data-layout",
+    "pip",
+  );
+
   // Stopping the share removes the share candidate and restores the normal
   // no-share participant layout.
   await toggleScreenSharing(alice.page);
