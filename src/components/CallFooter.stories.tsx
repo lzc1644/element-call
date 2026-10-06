@@ -562,12 +562,19 @@ async function assertFloatingGrid({
   });
   await expect(getComputedStyle(footer).position).toBe("absolute");
   await expect(getComputedStyle(footer).backgroundImage).toBe("none");
-  await expect(getComputedStyle(toolbar).backgroundImage).toBe("none");
-  await expect(getComputedStyle(toolbar).backgroundColor).toBe(
+  await expect(getComputedStyle(footer).backgroundColor).toBe(
     "rgba(0, 0, 0, 0)",
   );
-  await expect(getComputedStyle(toolbar).boxShadow).toBe("none");
-  await expect(getComputedStyle(toolbar).backdropFilter).toBe("none");
+  const toolbarStyle = getComputedStyle(toolbar);
+  await expect(toolbarStyle.backgroundImage).toContain("linear-gradient");
+  await expect(toolbarStyle.borderTopStyle).toBe("solid");
+  await expect(Number.parseFloat(toolbarStyle.borderTopWidth)).toBeGreaterThan(
+    0,
+  );
+  await expect(toolbarStyle.boxShadow).not.toBe("none");
+  await expect(toolbarStyle.backdropFilter).toContain("blur(");
+  await expect(Number.parseFloat(toolbarStyle.paddingTop)).toBeGreaterThan(0);
+  await expect(Number.parseFloat(toolbarStyle.paddingLeft)).toBeGreaterThan(0);
   const mic = canvas.getByRole("switch", { name: "Mute microphone" });
   await expect(getComputedStyle(mic).backgroundColor).not.toBe(
     "rgba(0, 0, 0, 0)",

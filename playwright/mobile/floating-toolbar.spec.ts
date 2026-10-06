@@ -60,11 +60,20 @@ for (const device of ["Pixel 7", "iPhone 13"] as const) {
           await expect(toolbar).toHaveCSS("opacity", "1");
           await expect(footer).toHaveCSS("position", "absolute");
           await expect(footer).toHaveCSS("background-image", "none");
-          await expect(toolbar).toHaveCSS(
+          await expect(footer).toHaveCSS(
             "background-color",
             "rgba(0, 0, 0, 0)",
           );
-          await expect(toolbar).toHaveCSS("box-shadow", "none");
+          await expect(toolbar).toHaveCSS(
+            "background-image",
+            /linear-gradient/,
+          );
+          await expect(toolbar).toHaveCSS("border-top-style", "solid");
+          await expect(toolbar).not.toHaveCSS("border-top-width", "0px");
+          await expect(toolbar).not.toHaveCSS("box-shadow", "none");
+          await expect(toolbar).toHaveCSS("backdrop-filter", /blur\(/);
+          await expect(toolbar).not.toHaveCSS("padding-top", "0px");
+          await expect(toolbar).not.toHaveCSS("padding-left", "0px");
           const height = await grid.evaluate((el) => el.clientHeight);
           await expect
             .poll(

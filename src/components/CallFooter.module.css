@@ -88,20 +88,6 @@ Please see LICENSE in the repository root for full details.
     inset 0 -1px 0 var(--cpd-color-alpha-gray-400);
 }
 
-/* Mobile controls keep their individual button surfaces, not a surrounding pill. */
-:global([data-element-call-root][data-platform="android"])
-  .footer.overlay
-  .toolbar,
-:global([data-element-call-root][data-platform="ios"])
-  .footer.overlay
-  .toolbar {
-  padding: 0;
-  border: 0;
-  background: none;
-  box-shadow: none;
-  backdrop-filter: none;
-}
-
 .footer.overlay .settingsLogoContainer {
   grid-area: settings;
 }
