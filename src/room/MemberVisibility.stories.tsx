@@ -69,6 +69,7 @@ function MemberVisibilityStory({
     openSettings: undefined,
     hangup: undefined,
     terminateCall: undefined,
+    terminationState: "idle",
     notifyControlInteraction: undefined,
     layoutSwitchVm: null,
     sharingScreen: false,

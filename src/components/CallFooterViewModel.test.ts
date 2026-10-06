@@ -10,7 +10,10 @@ import { BehaviorSubject } from "rxjs";
 
 import { testScope, mockMuteStates, mockMediaDevices } from "../utils/test";
 import { constant } from "../state/Behavior";
-import type { CallViewModel } from "../state/CallViewModel/CallViewModel";
+import {
+  type CallViewModel,
+  type CallTerminationState,
+} from "../state/CallViewModel/CallViewModel";
 import type { Alignment, Layout } from "../state/layout-types";
 import { type SpotlightTileViewModel } from "../state/TileViewModel";
 import type { DeviceLabel } from "../state/MediaDevices";
@@ -43,6 +46,8 @@ function buildMinimalCallViewModel(layout: Layout): CallViewModel {
     edgeToEdge$: constant(false),
     showHeader$: constant(false),
     hangup: (): void => {},
+    terminationState$: constant("idle"),
+    terminateCall: vi.fn().mockResolvedValue(undefined),
     gridMode$: constant("grid"),
     setGridMode: (): void => {},
     sharingScreen$: constant(false),
@@ -98,6 +103,31 @@ const twoMicsAndOneCamMediaDevices = mockMediaDevices({
 });
 
 describe("createCallFooterViewModel", () => {
+  it("keeps termination feedback visible and exposes retry only when not sending", () => {
+    const callModel = buildMinimalCallViewModel(gridLayout);
+    const state$ = new BehaviorSubject<CallTerminationState>("idle");
+    callModel.terminationState$ = state$;
+    callModel.showFooter$ = constant(false);
+    const vm = createCallFooterViewModel(
+      testScope(),
+      callModel,
+      mockMuteStates(),
+      mockMediaDevices({}),
+      undefined,
+      { showControls: true, header: HeaderStyle.Standard },
+    );
+
+    expect(vm.showFooter$.value).toBe(false);
+    state$.next("sending");
+    expect(vm.terminationState$.value).toBe("sending");
+    expect(vm.showFooter$.value).toBe(true);
+    expect(vm.terminateCall$.value).toBeUndefined();
+    state$.next("failed");
+    expect(vm.showFooter$.value).toBe(true);
+    vm.terminateCall$.value!();
+    expect(callModel.terminateCall).toHaveBeenCalledOnce();
+  });
+
   it("uses full-size buttons on mobile platforms outside PiP", () => {
     platformMock.mockReturnValue("android");
 

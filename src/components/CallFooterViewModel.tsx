@@ -7,7 +7,6 @@ Please see LICENSE in the repository root for full details.
 
 import { combineLatest, map, switchMap } from "rxjs";
 import { supportsBackgroundProcessors } from "@livekit/track-processors";
-import { logger } from "matrix-js-sdk/lib/logger";
 
 import { type CallViewModel } from "../state/CallViewModel/CallViewModel";
 import { type MenuOptions } from "./MediaMuteAndSwitchButton";
@@ -165,7 +164,11 @@ export function createCallFooterViewModel(
     ...buildMuteBehaviors(scope, muteStates),
     ...buildDeviceBehaviors(scope, mediaDevices, disableDeviceSwitcher$),
     // candidat to move into the FooterViewModel
-    showFooter$: callModel.showFooter$,
+    showFooter$: scope.behavior(
+      combineLatest([callModel.showFooter$, callModel.terminationState$]).pipe(
+        map(([show, state]) => show || state !== "idle"),
+      ),
+    ),
     hideControls$: constant(!showControls),
     showModals$: callModel.showModals$,
     // Controls float over the media on every platform.
@@ -203,11 +206,18 @@ export function createCallFooterViewModel(
     ),
 
     hangup$: constant(callModel.hangup),
-    terminateCall$: constant(() => {
-      void callModel.terminateCall().catch((error) => {
-        logger.error("Failed to terminate call for all participants", error);
-      });
-    }),
+    terminateCall$: scope.behavior(
+      callModel.terminationState$.pipe(
+        map((state) =>
+          state === "sending"
+            ? undefined
+            : (): void => {
+                void callModel.terminateCall();
+              },
+        ),
+      ),
+    ),
+    terminationState$: callModel.terminationState$,
     participantCount$: callModel.participantCount$,
 
     reactionIdentifier$: constant(reactionIdentifier),
@@ -259,6 +269,7 @@ export function createLobbyFooterViewModel(
       openSettings,
       hangup,
       terminateCall: undefined,
+      terminationState: "idle",
       participantCount: 0,
       debugTileLayout: false,
       showFooter: true,
