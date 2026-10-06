@@ -21,12 +21,27 @@ Please see LICENSE in the repository root for full details.
 page gradients to shine through. However, we sometimes need to visually separate
 it from the content underneath. If the call layout is overflowing, or if the
 spotlight tile is maximised and displaying video, apply a gradient background.
-Keep the expanded picture unobscured when members are explicitly hidden. */
-.inRoom:not(
+Keep the expanded picture unobscured when members are explicitly hidden.
+Mobile overlays leave the root gradient and participant tiles unobscured. */
+:global(
+    [data-element-call-root]:not(
+      [data-platform="android"],
+      [data-platform="ios"]
+    )
+  )
+  .inRoom:not(
     [data-layout="spotlight-expanded"][data-members-hidden="true"]
   ).overflowing
   > .footer,
-.inRoom:not([data-layout="spotlight-expanded"][data-members-hidden="true"]):has(
+:global(
+    [data-element-call-root]:not(
+      [data-platform="android"],
+      [data-platform="ios"]
+    )
+  )
+  .inRoom:not(
+    [data-layout="spotlight-expanded"][data-members-hidden="true"]
+  ):has(
     .fixedGrid
       > .tile[data-maximised="true"]
       .spotlightItem[data-background="transparent"][data-video-enabled="true"][aria-hidden="false"]
@@ -113,6 +128,42 @@ Keep the expanded picture unobscured when members are explicitly hidden. */
 .scrollingGrid[data-scrollable="true"] {
   inset-block-end: var(--call-footer-height);
   pointer-events: auto;
+}
+
+/* Match the footer's focus-visible reveal as well as its requested visibility. */
+:global([data-element-call-root][data-platform="android"]) .media,
+:global([data-element-call-root][data-platform="ios"]) .media {
+  --call-footer-clearance: 0px;
+}
+
+:global([data-element-call-root][data-platform="android"])
+  .inRoom:has(> .footer[data-controls-visible="true"], > .footer :focus-visible)
+  > .media,
+:global([data-element-call-root][data-platform="ios"])
+  .inRoom:has(> .footer[data-controls-visible="true"], > .footer :focus-visible)
+  > .media {
+  --call-footer-clearance: var(--call-footer-height);
+}
+
+:global([data-element-call-root][data-platform="android"])
+  .scrollingGrid[data-scrollable="true"],
+:global([data-element-call-root][data-platform="ios"])
+  .scrollingGrid[data-scrollable="true"] {
+  inset-block-end: 0;
+  scroll-padding-block-end: var(--call-footer-clearance);
+}
+
+/* Extra scroll travel, not a shorter viewport: the last row can clear visible
+controls without a permanent empty strip below the participant tiles. */
+:global([data-element-call-root][data-platform="android"])
+  .inRoom.overflowing
+  .scrollingGrid[data-scrollable="true"]::after,
+:global([data-element-call-root][data-platform="ios"])
+  .inRoom.overflowing
+  .scrollingGrid[data-scrollable="true"]::after {
+  content: "";
+  display: block;
+  block-size: var(--call-footer-clearance);
 }
 
 .inRoom[data-layout="spotlight-landscape"] .scrollingGrid {

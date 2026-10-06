@@ -207,6 +207,7 @@ exports[`InCallView > rendering > renders 1`] = `
     />
     <div
       class="_footer_4e7ff8 _footer_20b7b4 _overlay_20b7b4"
+      data-controls-visible="true"
       data-testid="footer-container"
     >
       <div

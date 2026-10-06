@@ -33,7 +33,7 @@ Please see LICENSE in the repository root for full details.
 }
 
 .footer.overlay {
-  /* 桌面端始终保持绝对悬浮，不改变原有视频区域高度。 */
+  /* Overlay controls never take space away from the media viewport. */
   position: absolute;
   inset-inline: 0;
   inset-block-end: 0;
@@ -42,14 +42,6 @@ Please see LICENSE in the repository root for full details.
   pointer-events: none;
   padding-block: var(--cpd-space-4x)
     calc(env(safe-area-inset-bottom) + var(--cpd-space-4x));
-}
-
-/* 手机端显示工具栏时让它参与布局，本地 PiP 就会避开控制区。 */
-:global([data-element-call-root][data-platform="android"])
-  .footer.overlay:not(.hidden),
-:global([data-element-call-root][data-platform="ios"])
-  .footer.overlay:not(.hidden) {
-  position: sticky;
 }
 
 .footer.overlay .toolbar {
@@ -94,6 +86,20 @@ Please see LICENSE in the repository root for full details.
     0 20px 48px rgb(16 24 40 / 0.18), 0 6px 16px rgb(16 24 40 / 0.12),
     inset 0 1px 0 rgb(255 255 255 / 0.8),
     inset 0 -1px 0 var(--cpd-color-alpha-gray-400);
+}
+
+/* Mobile controls keep their individual button surfaces, not a surrounding pill. */
+:global([data-element-call-root][data-platform="android"])
+  .footer.overlay
+  .toolbar,
+:global([data-element-call-root][data-platform="ios"])
+  .footer.overlay
+  .toolbar {
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  backdrop-filter: none;
 }
 
 .footer.overlay .settingsLogoContainer {

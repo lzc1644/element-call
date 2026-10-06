@@ -393,13 +393,18 @@ export const InCallView: FC<InCallViewProps> = ({
 
   const [headerRef, headerBounds] = useMeasure();
   const [footerRef, footerBounds] = useMeasure();
+  const showFooter = useBehavior(footerVm.showFooter$);
+  // Match the platform styling supplied by this call's root, including hosts.
+  const mobile =
+    rootElement.dataset.platform === "android" ||
+    rootElement.dataset.platform === "ios";
   const footerInset = showControls ? footerBounds.height : 0;
 
   const hasScrollingMembers =
     layout.type === "grid" ||
     layout.type === "spotlight-landscape" ||
     layout.type === "spotlight-portrait";
-  // The toolbar overlays the main picture; only scrolling members reserve it.
+  // Desktop members reserve the toolbar; mobile members scroll underneath it.
   const memberFooterInset =
     hasScrollingMembers && (layout.type !== "grid" || layout.grid.length > 1)
       ? footerInset
@@ -421,9 +426,9 @@ export const InCallView: FC<InCallViewProps> = ({
   const memberGridBounds = useMemo(
     () => ({
       ...gridBounds,
-      height: Math.max(0, gridBounds.height - memberFooterInset),
+      height: Math.max(0, gridBounds.height - (mobile ? 0 : memberFooterInset)),
     }),
-    [gridBounds, memberFooterInset],
+    [gridBounds, memberFooterInset, mobile],
   );
   const memberGridBoundsObservable$ = useObservable(
     (inputs$) => inputs$.pipe(map(([memberBounds]) => memberBounds)),
@@ -602,7 +607,6 @@ export const InCallView: FC<InCallViewProps> = ({
     };
   }, [gridBoundsObservable$, memberGridBoundsObservable$]);
 
-  const showFooter = useBehavior(footerVm.showFooter$);
   const renderContent = (): JSX.Element => {
     if (layout.type === "pip") {
       return (
