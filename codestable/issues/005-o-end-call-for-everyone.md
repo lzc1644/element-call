@@ -10,7 +10,7 @@ created: 2026-10-06
 
 ## 接手先读
 
-本文件是用户已确认方案的执行交接。**第一版已提交；Android/iOS Element X 实测暴露了宿主收发权限问题，本轮已修复共享事件信封并通过定向测试，待部署新版及真机复测；还不是完整验收或关闭。** 实际改动、检查与未验证项见文末执行记录。用户最终选择的是**尽力通知所有参与端退出**，接受异常设备可能未退出；不要恢复此前讨论过的服务端强制结束、全员确认或复杂恢复方案。
+本文件是用户已确认方案的执行交接。**第一版及信封改动已提交；手机可响应网页端结束，但自身发送及普通表情均立即失败。用户截图已确认原生加密收集设备时因“已验证用户有未签名设备”拒绝发送；需要修复相关账号的设备交叉签名并复测，尚未恢复手机发送，不是完整验收或关闭。** 实际改动、检查与未验证项见文末执行记录。用户最终选择的是**尽力通知所有参与端退出**，接受异常设备可能未退出；不要恢复此前讨论过的服务端强制结束、全员确认或复杂恢复方案。
 
 这是本地用户确认的功能范围，不表示已有上游 issue 或维护者批准。后续模型接到实现指令后，以本文件为需求入口，先读取根 AGENTS.md、docs/agents/workflow.md，以及架构、代码风格和测试指南。当前稳定背景见 [Project Spec](../spec/index.md)。
 
@@ -227,4 +227,53 @@ created: 2026-10-06
 3. 同账号网页和手机重复以上双向操作；普通挂断仍只离开当前设备。锁屏/断网等情形沿用原“尽力通知”边界，不增加追查。
 4. 若仍出现警告，提供 `[CallViewModel] Failed to send call termination notification` 对应的完整错误和应用版本，区分权限、加密、网络等实际失败；不直接据此增加重试或第二通道。
 
-本轮在 `dev` 上完成修改，**未 commit、push、部署或关闭**。真实 Element X/SchildiChat Next 尚待用户复测，不能把传输模拟通过写成全平台验收通过。
+该轮交接时在 `dev` 上完成修改，未 commit、push、部署或关闭；用户随后提交了信封改动（当前 `feat/all-end` 的 `f1677333`）。不能把传输模拟通过写成全平台验收通过。
+
+## 手机仍无法发送：继续诊断（2026-10-06）
+
+用户新反馈：手机发起全员结束仍显示未发送，但能响应网页端发起的结束并退出。手机具体应用版本、失败异常和发起到警告的耗时均未提供；不能从这个通用警告断言“还是类型权限失败”，也不能确定请求未到服务器。DM 还存在对端离开后自动退出的路径，若要单独确认控制通知接收，应以群通话或 `terminated` 退出原因为证。
+
+### 已核对的发送链路
+
+1. VM 生成事务 ID，调用 `MatrixClient.sendEvent()`；JS SDK 建立本地 pending event，再进入 RoomWidgetClient。UUID 或本地 pending 处理的异常也会进入同一个失败提示，不一定到达原生宿主。
+2. 真正的 `WidgetApi.sendRoomEvent()` 组装 `send_event`，请求只有 `type: io.element.call.reaction`、结束信封 `content`、`room_id`；没有 `state_key`、`delay`、`parent_delay_id` 或 sticky 参数。结束调用本身不会意外变成 state/delayed 发送。
+3. 已核对版本的 Rust [发送过滤器](https://github.com/matrix-org/matrix-rust-sdk/blob/161e46235dfb5ab93561671cd5819fdf6bad5715/crates/matrix-sdk/src/widget/filter.rs#L271-L300) 对此类型只比对事件类型，不要求 `emoji`、`name` 或 `m.relates_to`。权限提供器在 read/send 两边都加入它；但仍需客户端版本或实际回包确认用户设备的运行时情况。
+4. Rust [MatrixDriver::send](https://github.com/matrix-org/matrix-rust-sdk/blob/161e46235dfb5ab93561671cd5819fdf6bad5715/crates/matrix-sdk/src/widget/matrix.rs) 将普通即时事件交给 `room.send_raw()`，没有额外的表情内容校验。
+5. [send_raw 的加密发送](https://github.com/matrix-org/matrix-rust-sdk/blob/161e46235dfb5ab93561671cd5819fdf6bad5715/crates/matrix-sdk/src/room/futures.rs) 中，`io.element.call.reaction` **不是**免加密的 `m.reaction`。加密房间会经过同步成员、查询设备密钥、预共享房间密钥、加密及 HTTP 发送；能解密接收并不能证明这条出站路径正常。
+6. Rust 成功回包提供 `event_id`，可同时含 `delay_id: null`；JS SDK 用 ID 更新 pending event 为 SENT 才 resolve。缺少 ID、状态更新异常或回包超时也会进入相同警告。当前 widget transport 默认等待 10 秒；如果警告约 10 秒出现，应先核对是否是 `widget api timeout`，而不是直接增大超时或重发。
+
+### 本轮验证与剩余证据
+
+- 改进 `CallTerminationTransport.test.ts`：模拟边界从 `WidgetApi.sendRoomEvent()` 下移至 `api.transport.send`，让真实 WidgetApi 执行请求组装。断言准确请求字段、显式事务 ID发送及含 `delay_id: null` 的原生形态回包能使本地事件达到 SENT。
+- **9 条定向测试通过**；TypeScript、该文件 lint/format 通过。仍只模拟外部宿主，不包含真实 WebView、Rust 加密或服务器发送。本轮没有修改生产发送代码、UI、事件编码或增加 fallback。
+- 目前可区分但未确认的分叉：发送前 JS/本地 pending 失败；实际宿主权限拒绝；原生加密/密钥共享或服务器错误；请求超时/回包缺 ID/SDK 状态处理失败。不能靠源码模拟替代对其中某一条的实机确认。
+- 下一步需要失败时间附近 `[CallViewModel] Failed to send call termination notification` 的完整错误（name/message、错误码或 data、相关堆栈），以及应用版本和警告耗时。日志不要包含 access token、密钥等敏感信息。
+- 可用一次同房间对照收窄：手机在通话里发送普通 👍，确认**网页对端收到**而非只看本机动画。它使用相同 IO 事件和原生发送/加密路径；举手使用不同的 `m.reaction`，不能代替这一对照。若普通表情也失败，再看该手机在同房间正常发送聊天消息是否失败；若表情正常而仅结束失败，则进一步查终止调用的本地状态及具体宿主回包。
+
+本轮仅改进诊断测试和记录，未 commit、push、部署或关闭。该阶段根因尚待失败日志；随后用户提供的表情错误截图已确认加密收件设备检查失败，见下节。
+
+## 截图确认原生加密拒绝（2026-10-06）
+
+用户提供远程调试截图并确认：结束通知和普通表情都立即报错。截图显示两种动作均已组装并发出 `send_event`，type 都是 `io.element.call.reaction`；普通表情带正常 `m.relates_to`、`emoji`、`name`，同样失败。因此不是终止信封特有的内容或发送前 UUID 异常，也不符合默认 10 秒 timeout 的表现。
+
+普通表情的错误提示给出了具体信息：
+
+```text
+encryption failed due to an error collecting the recipient devices:
+one or more verified users have unsigned devices
+```
+
+该信息与 Rust [SessionRecipientCollectionError::VerifiedUserHasUnsignedDevice](https://github.com/matrix-org/matrix-rust-sdk/blob/161e46235dfb5ab93561671cd5819fdf6bad5715/crates/matrix-sdk-crypto/src/error.rs#L401-L414) 一致。在 [ErrorOnVerifiedUserProblem 收件设备策略](https://github.com/matrix-org/matrix-rust-sdk/blob/161e46235dfb5ab93561671cd5819fdf6bad5715/crates/matrix-sdk-crypto/src/session_manager/group_sessions/share_strategy.rs#L275-L334) 中，只要某个已验证账号存在未被该账号交叉签名的设备，就在共享房间密钥之前报错；普通事件的 HTTP 发送尚未执行。设备判断与账号自身/其他用户验证逻辑见同文件约 1096–1151 行。
+
+**结论：普通表情的直接根因已确认是原生端的设备信任/交叉签名检查，结束通知的相同发送路径与立即失败高度指向同一原因。** 结束通知截图自身只记录 `{"data":{}}`，未展示它的 `Error.message`，不能据此宣称已直接捕获它的完整异常。错误对象的 message/stack 通常是非枚举属性，JSON 形式的日志可能不显示它们；表情 UI 读取 `ex.message`，所以揭露了控制台摘要缺失的原因。配置预加载警告和 WebRTC stats 不是本次加密错误的解释。
+
+截图没有给出错误携带的具体 user/device 清单，不能断言一定是当前手机、网页、对端，或必须验证全部陌生设备。[preshare_room_key()](https://github.com/matrix-org/matrix-rust-sdk/blob/161e46235dfb5ab93561671cd5819fdf6bad5715/crates/matrix-sdk/src/room/mod.rs#L2461-L2494) 使用房间的 `RoomMemberships::ACTIVE` 成员集合，不是 MatrixRTC/LiveKit 在线参与者集合。因此阻塞发送的设备可能属于房间成员（包括自己的其他会话），无需正在通话；排查不能只看当前通话设备。
+
+### 正确的恢复路径及边界
+
+- 优先在账号的原生客户端/Element Web 安全与会话管理里，核实并交叉签名自己的合法新会话（包括本轮使用的网页通话账号会话）；与已有可信会话或恢复密钥按客户端流程完成验证。
+- 若自己的合法设备均已签名，检查该房间中已验证联系人的会话，**不限于正在通话的联系人或设备**，需由相应账号的持有人签名其合法设备。先确认设备归属；陌生设备不应盲目信任。废弃或可疑会话应由账号持有人按宿主安全流程处理，不重置身份或删除密钥来碰运气。
+- 完成签名并同步后，先以“手机发普通 👍，网页对端收到”验证同一原生加密出站路径恢复，再手动重试全员结束；继续核实双方退出及媒体/宿主清理。
+- 前端 widget 没有在现有权限中管理/签名宿主设备的能力。此次不关闭设备信任检查，不改为明文 `m.reaction` 规避加密，也不通过另一个通道或自动重试掩盖问题。真正的签名/信任修复属于宿主账号安全流程。
+
+本阶段没有新增生产代码改动，未声称签名后已经实机通过。上一轮九条传输测试和类型/lint 检查仍仅证明前端协议契约，不覆盖用户设备的加密信任状态。
