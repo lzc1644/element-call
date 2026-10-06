@@ -1,4 +1,5 @@
 /*
+Copyright 2026 Element Creations Ltd.
 Copyright 2024-2025 New Vector Ltd.
 
 SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
@@ -43,7 +44,7 @@ interface EndCallMenuButtonProps extends Omit<
   /**
    * Callback to terminate the call for all participants.
    */
-  onTerminate: () => void;
+  onTerminate: (() => void) | undefined;
   /**
    * Number of participants currently in the call.
    */
@@ -120,7 +121,7 @@ export const EndCallMenuButton: FC<EndCallMenuButtonProps> = ({
     (e: Event) => {
       if (confirming) {
         // Second click - actually terminate
-        onTerminate();
+        onTerminate?.();
         setConfirming(false);
         setOpen(false);
       } else {
@@ -176,6 +177,7 @@ export const EndCallMenuButton: FC<EndCallMenuButtonProps> = ({
               : t("terminate_call_button")
           }
           onSelect={handleTerminate}
+          disabled={onTerminate === undefined}
           kind="critical"
           className={classNames(styles.terminateItem, {
             [styles.confirming]: confirming,

@@ -1,4 +1,5 @@
 /*
+Copyright 2026 Element Creations Ltd.
 Copyright 2026 New Vector Ltd.
 
 SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
@@ -130,8 +131,8 @@ export class CallTerminationReader {
   private localJoinedAt: number | undefined;
 
   /**
-   * Emits when the call is terminated by another participant.
-   * Does not emit for events sent by the local user.
+   * Emits an admitted termination, including another device on this account
+   * or this device's server echo. The call lifecycle handles leaving once.
    */
   public readonly termination$ = this.terminationSubject$.asObservable();
 
@@ -311,15 +312,6 @@ export class CallTerminationReader {
     }
 
     if (event.isBeingDecrypted() || event.isDecryptionFailure()) return;
-
-    // Ignore events sent by ourselves - we'll leave via our own hangup. Keep
-    // the existing same-account semantics, including other devices.
-    const localUserId = this.client.getUserId();
-    if (sender === localUserId) {
-      logger.debug(`Ignoring self-sent termination event from ${sender}`);
-      this.liveEventIds.delete(eventId);
-      return;
-    }
 
     const termination = parseTerminationEvent(event, sender);
     if (!termination) {

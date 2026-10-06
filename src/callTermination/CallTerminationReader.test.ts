@@ -1,4 +1,5 @@
 /*
+Copyright 2026 Element Creations Ltd.
 Copyright 2026 New Vector Ltd.
 
 SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
@@ -12,6 +13,7 @@ import {
   RoomEvent as MatrixRoomEvent,
 } from "matrix-js-sdk";
 import { describe, expect, test, vi } from "vitest";
+import { EventStatus } from "matrix-js-sdk/lib/models/event";
 
 import { getBasicRTCSession } from "../utils/test-viewmodel";
 import {
@@ -19,6 +21,7 @@ import {
   aliceDeviceId,
   local,
   localRtcMember,
+  localRtcMemberDevice2,
 } from "../utils/test-fixtures";
 import { mockRtcMembership, testScope } from "../utils/test";
 import { CallTerminationReader } from "./CallTerminationReader";
@@ -98,8 +101,11 @@ describe("CallTerminationReader", () => {
     ]);
   });
 
-  test("ignores termination events sent by the local user", () => {
-    const { rtcSession } = getBasicRTCSession([local, alice]);
+  test("admits termination from another device on the same account", () => {
+    const { rtcSession } = getBasicRTCSession(
+      [local],
+      [localRtcMember, localRtcMemberDevice2],
+    );
     const reader = new CallTerminationReader(
       testScope(),
       rtcSession.asMockedSession(),
@@ -118,7 +124,38 @@ describe("CallTerminationReader", () => {
       }),
     );
 
-    expect(terminations).toStrictEqual([]);
+    expect(terminations).toStrictEqual([
+      {
+        terminatedBy: localRtcMember.userId,
+        reason: undefined,
+        timestamp: 12345,
+      },
+    ]);
+  });
+
+  test("admits this device's server echo, but not its unsent local event", () => {
+    const { rtcSession } = getBasicRTCSession([local]);
+    const reader = new CallTerminationReader(
+      testScope(),
+      rtcSession.asMockedSession(),
+      rtcSession.room.client,
+    );
+    const onTermination = vi.fn();
+    reader.termination$.subscribe(onTermination);
+    const event = makeTerminationEvent({
+      roomId: rtcSession.room.roomId,
+      sender: localRtcMember.userId,
+    });
+    event.setStatus(EventStatus.SENDING);
+    emitTimeline(rtcSession, event);
+    event.setStatus(EventStatus.NOT_SENT);
+    emitTimeline(rtcSession, event);
+    expect(onTermination).not.toHaveBeenCalled();
+
+    event.setStatus(null);
+    emitTimeline(rtcSession, event);
+    emitTimeline(rtcSession, event);
+    expect(onTermination).toHaveBeenCalledOnce();
   });
 
   test.each([
