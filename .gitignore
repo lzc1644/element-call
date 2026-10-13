@@ -50,3 +50,6 @@ storybook-static
 .omx/
 .playwright-mcp/
 .claude/worktrees/
+
+# Nested checkout made by scripts/layered.sh
+/matrix-js-sdk/

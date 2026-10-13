@@ -36,7 +36,7 @@ function PipLayoutStory({ screenShare }: { screenShare: boolean }): ReactNode {
       mxcAvatarUrl$: constant(undefined),
       participant$: constant(null),
       livekitRoom$: constant(undefined),
-      focusUrl$: constant(undefined),
+      transport$: constant(undefined),
       encryptionSystem: { kind: E2eeType.NONE } as const,
     };
     const media = screenShare

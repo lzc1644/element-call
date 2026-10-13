@@ -14,7 +14,6 @@ import {
   Track,
 } from "livekit-client";
 import { logger } from "matrix-js-sdk/lib/logger";
-import { useObservableEagerState } from "observable-hooks";
 
 import { useMediaDevices } from "../MediaDevicesContext";
 import { type MuteStates } from "../state/MuteStates";
@@ -47,9 +46,7 @@ export function usePrejoinMedia(
   const videoEnabled = useBehavior(muteStates.video.enabled$);
   const shouldPrepare = !onlyWhenEnabled || audioEnabled || videoEnabled;
   const devices = useMediaDevices();
-  const videoInputId = useObservableEagerState(
-    devices.videoInput.selected$,
-  )?.id;
+  const videoInputId = useBehavior(devices.videoInput.selected$)?.id;
 
   const initialAudioOptions = useInitial(
     () =>

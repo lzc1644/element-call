@@ -8,7 +8,6 @@ Please see LICENSE in the repository root for full details.
 import {
   type Observable,
   audit,
-  combineLatest,
   concat,
   defer,
   filter,
@@ -114,14 +113,6 @@ export function getValue<T>(state$: Observable<T>): T {
 }
 
 /**
- * Creates an Observable that has a value of true whenever some of its inputs
- * are true.
- */
-export function or$(...inputs: Observable<boolean>[]): Observable<boolean> {
-  return combineLatest(inputs, (...flags) => flags.some((flag) => flag));
-}
-
-/**
  * RxJS operator that pauses all changes in the input value whenever a Behavior
  * is true. When the Behavior returns to being false, the most recently
  * suppressed change is emitted as the most recent value.
@@ -224,6 +215,28 @@ export function filterBehavior<T, S extends T>(
         return null;
       }, null),
       distinctUntilChanged(),
+    );
+}
+
+/**
+ * Applies a given projection to each value emitted by the source Observable.
+ * The `project` function additionally receives an {@link ObservableScope}.
+ */
+export function mapScoped<A, B>(
+  name: string,
+  project: (a: A, scope: ObservableScope) => B,
+): OperatorFunction<A, B> {
+  return (a$) =>
+    a$.pipe(
+      generateItemsInternal(
+        name,
+        function* (a) {
+          yield { keys: [a], data: undefined };
+        },
+        (scope, _data$, a) => project(a, scope),
+        (items) => items,
+      ),
+      map(([item]) => item),
     );
 }
 

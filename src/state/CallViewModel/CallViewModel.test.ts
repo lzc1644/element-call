@@ -39,7 +39,7 @@ import {
   type CallMembership,
   type IRTCNotificationContent,
   MatrixRTCSessionEvent,
-  type LivekitTransport,
+  type UnstableLivekitTransport,
 } from "matrix-js-sdk/lib/matrixrtc";
 import { deepCompare } from "matrix-js-sdk/lib/utils";
 import { EventStatus } from "matrix-js-sdk/lib/models/event";
@@ -119,7 +119,7 @@ vi.mock(
   "../state/CallViewModel/localMember/localTransport",
   async (importOriginal) => ({
     ...(await importOriginal()),
-    makeTransport: async (): Promise<LivekitTransport> =>
+    makeTransport: async (): Promise<UnstableLivekitTransport> =>
       Promise.resolve(exampleTransport),
   }),
 );

@@ -76,4 +76,12 @@ Code that builds in only one is a bug.
 - `build:component` — `@element-hq/element-call-component`, sources in `component/`
   (its own pnpm project; run pnpm from the repo root). Host API is in the README;
   `pnpm lint:externals` rejects an import of a `react` / `react-dom` /
-  `matrix-js-sdk` / `livekit-client` subpath the externals list omits.
+  `matrix-js-sdk` / `@vector-im/compound-web` /
+  `@vector-im/compound-design-tokens` subpath the externals list omits.
+  `livekit-client` is bundled on purpose: no host imports it, and the pinned
+  version travels with the component.
+  Compound's stylesheets are loaded by `src/index.css` for the page and by the
+  host for the component, never by `src/base.css`. Two entry
+  points: `index.tsx` (the component) and `api.ts` (types, enums and
+  `configurationForIntent`, for a host that must not load the component). `api.ts`
+  may only reach types and constants — `src/UrlConfiguration.ts`, not `UrlParams`.

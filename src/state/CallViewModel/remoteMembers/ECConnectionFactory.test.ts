@@ -18,7 +18,10 @@ import EventEmitter from "events";
 
 import { ObservableScope } from "../../ObservableScope.ts";
 import { ECConnectionFactory } from "./ConnectionFactory.ts";
-import type { OpenIDClientParts } from "../../../livekit/openIDSFU.ts";
+import {
+  type ClientGetTokenParts,
+  type ClientOpenIDParts,
+} from "../../../livekit/auth";
 import {
   exampleTransport,
   mockMediaDevices,
@@ -36,6 +39,7 @@ import {
   cameraBitrate,
   cameraCodec,
 } from "../../../settings/settings.ts";
+import { testJWTToken } from "../../../utils/test-fixtures.ts";
 
 // At the top of your test file, after imports
 vi.mock("livekit-client", async (importOriginal) => {
@@ -59,13 +63,13 @@ vi.mock("livekit-client/e2ee-worker?worker&inline", () => ({
 }));
 
 let testScope: ObservableScope;
-let mockClient: OpenIDClientParts;
+let mockClient: ClientGetTokenParts & ClientOpenIDParts;
 
 beforeEach(() => {
   testScope = new ObservableScope();
   mockClient = {
     getOpenIdToken: vi.fn().mockReturnValue(""),
-    getDeviceId: vi.fn().mockReturnValue("DEV000"),
+    _unstable_getLivekitToken: vi.fn().mockResolvedValue({ jwt: testJWTToken }),
   };
 });
 
@@ -87,6 +91,7 @@ describe("ECConnectionFactory - Audio inputs options", () => {
       const ecConnectionFactory = new ECConnectionFactory(
         mockClient,
         "!roomid:example.org",
+        "m.call#ROOM",
         mockMediaDevices({}),
         new BehaviorSubject<ProcessorState>({
           supported: true,
@@ -97,7 +102,9 @@ describe("ECConnectionFactory - Audio inputs options", () => {
       );
       ecConnectionFactory.createConnection(
         testScope,
+        "subscriber",
         exampleTransport,
+        "example.org",
         ownMemberMock,
         logger,
       );
@@ -131,6 +138,7 @@ test("it creates a room when the key provider has a circular reference", () => {
     const ecConnectionFactory = new ECConnectionFactory(
       mockClient,
       "!roomid:example.org",
+      "m.call#ROOM",
       mockMediaDevices({}),
       new BehaviorSubject<ProcessorState>({
         supported: true,
@@ -142,7 +150,9 @@ test("it creates a room when the key provider has a circular reference", () => {
 
     const connection = ecConnectionFactory.createConnection(
       testScope,
+      "subscriber",
       exampleTransport,
+      "example.org",
       ownMemberMock,
       logger,
     );
@@ -177,6 +187,7 @@ describe("ECConnectionFactory - ControlledAudioDevice", () => {
       const ecConnectionFactory = new ECConnectionFactory(
         mockClient,
         "!roomid:example.org",
+        "m.call#ROOM",
         mockMediaDevices({
           audioOutput: {
             available$: constant(new Map<never, never>()),
@@ -193,7 +204,9 @@ describe("ECConnectionFactory - ControlledAudioDevice", () => {
       );
       ecConnectionFactory.createConnection(
         testScope,
+        "subscriber",
         exampleTransport,
+        "example.org",
         ownMemberMock,
         logger,
       );
@@ -218,6 +231,7 @@ describe("ECConnectionFactory - Camera quality settings", () => {
     const ecConnectionFactory = new ECConnectionFactory(
       mockClient,
       "!roomid:example.org",
+      "m.call#ROOM",
       mockMediaDevices({}),
       new BehaviorSubject<ProcessorState>({
         supported: true,
@@ -228,7 +242,9 @@ describe("ECConnectionFactory - Camera quality settings", () => {
     );
     ecConnectionFactory.createConnection(
       testScope,
+      "subscriber",
       exampleTransport,
+      "example.org",
       ownMemberMock,
       logger,
     );
@@ -255,6 +271,7 @@ describe("ECConnectionFactory - Camera quality settings", () => {
     const ecConnectionFactory = new ECConnectionFactory(
       mockClient,
       "!roomid:example.org",
+      "m.call#ROOM",
       mockMediaDevices({}),
       new BehaviorSubject<ProcessorState>({
         supported: true,
@@ -265,7 +282,9 @@ describe("ECConnectionFactory - Camera quality settings", () => {
     );
     ecConnectionFactory.createConnection(
       testScope,
+      "subscriber",
       exampleTransport,
+      "example.org",
       ownMemberMock,
       logger,
     );
@@ -293,6 +312,7 @@ describe("ECConnectionFactory - Camera quality settings", () => {
     const ecConnectionFactory = new ECConnectionFactory(
       mockClient,
       "!roomid:example.org",
+      "m.call#ROOM",
       mockMediaDevices({}),
       new BehaviorSubject<ProcessorState>({
         supported: true,
@@ -303,7 +323,9 @@ describe("ECConnectionFactory - Camera quality settings", () => {
     );
     ecConnectionFactory.createConnection(
       testScope,
+      "subscriber",
       exampleTransport,
+      "example.org",
       ownMemberMock,
       logger,
     );

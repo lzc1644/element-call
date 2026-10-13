@@ -251,12 +251,7 @@ const LoadedCallView: FC<LoadedProps> = ({
   const { displayName, avatarUrl } = useProfile(client);
   const roomName = useRoomName(room);
   const roomAvatar = useRoomAvatar(room);
-  const {
-    perParticipantE2EE,
-    returnToLobby,
-    password: passwordFromUrl,
-    header,
-  } = useUrlParams();
+  const { returnToLobby, password: passwordFromUrl, header } = useUrlParams();
   const e2eeSystem = useRoomEncryptionSystem(room.roomId);
 
   // Save the password once we start the groupCallView
@@ -398,7 +393,6 @@ const LoadedCallView: FC<LoadedProps> = ({
     rtcSession,
     preload,
     skipLobby,
-    perParticipantE2EE,
     mediaDevices,
     latestMuteStates,
     setJoined,

@@ -32,6 +32,10 @@ widgetTest("Put call in PIP", async ({ addUser, browserName }) => {
 
   // Start the call as Valere
   await TestHelpers.startCallInCurrentRoom(valere.page, false);
+  await valere.page
+    .getByRole("dialog", { name: "Approve widget permissions" })
+    .getByRole("button", { name: "Approve", exact: true })
+    .click();
   await expect(
     valere.page.locator('iframe[title="Element Call"]'),
   ).toBeVisible();
@@ -39,12 +43,17 @@ widgetTest("Put call in PIP", async ({ addUser, browserName }) => {
   await TestHelpers.joinCallFromLobby(valere.page);
 
   await TestHelpers.joinCallInCurrentRoom(timo.page);
+  await timo.page
+    .getByRole("dialog", { name: "Approve widget permissions" })
+    .getByRole("button", { name: "Approve", exact: true })
+    .click();
 
   const frame = timo.page
     .locator('iframe[title="Element Call"]')
     .contentFrame();
 
-  // check that the video is on
+  // Reveal the auto-hiding controls before checking the camera state.
+  await frame.locator("[data-layout]").hover();
   await expect(
     frame.getByRole("switch", { name: "Stop video", checked: true }),
   ).toBeVisible({
