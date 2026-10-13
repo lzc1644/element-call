@@ -21,8 +21,6 @@ import {
 import useMeasure from "react-use-measure";
 import { type MatrixRTCSession } from "matrix-js-sdk/lib/matrixrtc";
 import classNames from "classnames";
-import { map } from "rxjs";
-import { useObservable } from "observable-hooks";
 import { logger as rootLogger } from "matrix-js-sdk/lib/logger";
 import { useTranslation } from "react-i18next";
 
@@ -78,10 +76,11 @@ import {
   useAppBarSubtitle,
 } from "../AppBar.tsx";
 import { useBehavior } from "../useBehavior.ts";
+import { useValueBehavior } from "../useValueBehavior.ts";
 import { constant } from "../state/Behavior.ts";
 import { Toast } from "../Toast.tsx";
 import overlayStyles from "../Overlay.module.css";
-import { useTrackProcessorObservable$ } from "../livekit/TrackProcessorContext.tsx";
+import { useTrackProcessorState$ } from "../livekit/TrackProcessorContext.tsx";
 import { type Layout } from "../state/layout-types.ts";
 import { ObservableScope } from "../state/ObservableScope.ts";
 import { CallFooter, type FooterSnapshot } from "../components/CallFooter.tsx";
@@ -135,7 +134,7 @@ export const ActiveCall: FC<ActiveCallProps> = (props) => {
   const urlParams = useUrlParams();
   const hostBridge = useHostBridge();
   const mediaDevices = useMediaDevices();
-  const trackProcessorState$ = useTrackProcessorObservable$();
+  const trackProcessorState$ = useTrackProcessorState$();
   // The element we have to draw the call in: the page, or the container a host
   // gave us. Its size, not the window's, decides how the call is laid out.
   const rootElement = useRootElement();
@@ -165,7 +164,7 @@ export const ActiveCall: FC<ActiveCallProps> = (props) => {
       },
       reactionsReader.raisedHands$,
       reactionsReader.reactions$,
-      scope.behavior(trackProcessorState$),
+      trackProcessorState$,
     );
     // TODO move this somewhere else once we use the callViewModel in the lobby as well!
     vm.join();
@@ -270,7 +269,7 @@ export const InCallView: FC<InCallViewProps> = ({
 
   useWakeLock();
   // TODO-MULTI-SFU This is unused now??
-  // const connectionState = useObservableEagerState(vm.livekitConnectionState$);
+  // const connectionState = useBehavior(vm.livekitConnectionState$);
 
   // annoyingly we don't get the disconnection reason this way,
   // only by listening for the emitted event
@@ -419,10 +418,7 @@ export const InCallView: FC<InCallViewProps> = ({
     }),
     [bounds.width, bounds.height, headerBounds.height, edgeToEdge],
   );
-  const gridBoundsObservable$ = useObservable(
-    (inputs$) => inputs$.pipe(map(([gridBounds]) => gridBounds)),
-    [gridBounds],
-  );
+  const gridBounds$ = useValueBehavior(gridBounds);
   const memberGridBounds = useMemo(
     () => ({
       ...gridBounds,
@@ -430,10 +426,7 @@ export const InCallView: FC<InCallViewProps> = ({
     }),
     [gridBounds, memberFooterInset, mobile],
   );
-  const memberGridBoundsObservable$ = useObservable(
-    (inputs$) => inputs$.pipe(map(([memberBounds]) => memberBounds)),
-    [memberGridBounds],
-  );
+  const memberGridBounds$ = useValueBehavior(memberGridBounds);
 
   useAppBarHidden(!showHeader);
   useAppBarSubtitle(
@@ -596,16 +589,16 @@ export const InCallView: FC<InCallViewProps> = ({
   );
 
   const layouts = useMemo(() => {
-    const inputs = { minBounds$: gridBoundsObservable$ };
+    const inputs = { minBounds$: gridBounds$ };
     return {
-      grid: makeGridLayout({ minBounds$: memberGridBoundsObservable$ }),
+      grid: makeGridLayout({ minBounds$: memberGridBounds$ }),
       "spotlight-landscape": makeSpotlightLandscapeLayout(inputs),
       "spotlight-portrait": makeSpotlightPortraitLayout(inputs),
       "spotlight-expanded": makeSpotlightExpandedLayout(inputs),
       "one-on-one-desktop": makeOneOnOneDesktopLayout(inputs),
       "one-on-one-mobile": makeOneOnOneMobileLayout(inputs),
     };
-  }, [gridBoundsObservable$, memberGridBoundsObservable$]);
+  }, [gridBounds$, memberGridBounds$]);
 
   const renderContent = (): JSX.Element => {
     if (layout.type === "pip") {
@@ -736,10 +729,10 @@ export const InCallView: FC<InCallViewProps> = ({
           onToggle={vm.toggleHeaderPinned}
         />
       )}
-      {audioParticipants.map(({ livekitRoom, url, participants }) => (
+      {audioParticipants.map(({ livekitRoom, transport, participants }) => (
         <LivekitRoomAudioRenderer
-          key={url}
-          url={url}
+          key={JSON.stringify(transport)}
+          transport={transport}
           livekitRoom={livekitRoom}
           validIdentities={participants}
           muted={muteAllAudio}
@@ -773,15 +766,19 @@ export const InCallView: FC<InCallViewProps> = ({
             tab={settingsTab}
             onTabChange={setSettingsTab}
             developerSettingsVm={developerSettingsVm}
-            livekitRooms={allConnections
-              .getConnections()
-              .map((connectionItem) => ({
-                room: connectionItem.livekitRoom,
-                livekitAlias: connectionItem.livekitAlias,
-                // TODO compute is local or tag it in the livekit room items already
-                isLocal: undefined,
-                url: connectionItem.transport.livekit_service_url,
-              }))}
+            livekitRooms={allConnections.map(
+              ({ livekitRoom: room, livekitAlias, transport, role }) => ({
+                room,
+                livekitAlias,
+                role,
+                url:
+                  // It should be relatively clear to the user which kind of URL
+                  // this is, based on the scheme (ws:// vs. http://)
+                  "url" in transport
+                    ? transport.url
+                    : transport.livekit_service_url,
+              }),
+            )}
           />
         </>
       )}

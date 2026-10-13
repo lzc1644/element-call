@@ -27,8 +27,13 @@ import {
   VolumeOnSolidIcon,
 } from "@vector-im/compound-design-tokens/assets/web/icons";
 import { animated } from "@react-spring/web";
-import { Observable, filter, shareReplay, switchMap } from "rxjs";
-import { useObservableRef } from "observable-hooks";
+import {
+  BehaviorSubject,
+  Observable,
+  filter,
+  shareReplay,
+  switchMap,
+} from "rxjs";
 import { useTranslation } from "react-i18next";
 import classNames from "classnames";
 import { type TrackReferenceOrPlaceholder } from "@livekit/components-core";
@@ -60,6 +65,7 @@ import { RingingStatus } from "./RingingStatus";
 import { useRootElement } from "../RootElementContext";
 import { useRootSizeMatches } from "../useRootSize";
 import { observeElementSize$ } from "../utils/elementSize";
+import { type UnstableLivekitTransport } from "matrix-js-sdk/lib/matrixrtc";
 
 interface SpotlightItemBaseProps {
   ref?: Ref<HTMLDivElement>;
@@ -80,7 +86,7 @@ interface SpotlightItemBaseProps {
 interface SpotlightMemberMediaItemBaseProps extends SpotlightItemBaseProps {
   video: TrackReferenceOrPlaceholder | undefined;
   unencryptedWarning: boolean;
-  focusUrl: string | undefined;
+  transport: UnstableLivekitTransport | undefined;
 }
 
 interface SpotlightUserMediaItemBaseProps extends SpotlightMemberMediaItemBaseProps {
@@ -183,13 +189,13 @@ const SpotlightMemberMediaItem: FC<SpotlightMemberMediaItemProps> = ({
 }) => {
   const video = useBehavior(vm.video$);
   const unencryptedWarning = useBehavior(vm.unencryptedWarning$);
-  const focusUrl = useBehavior(vm.focusUrl$);
+  const transport = useBehavior(vm.transport$);
 
   const baseProps: SpotlightMemberMediaItemBaseProps &
     RefAttributes<HTMLDivElement> = {
     video: video ?? undefined,
     unencryptedWarning,
-    focusUrl,
+    transport,
     ...props,
   };
 
@@ -477,7 +483,13 @@ export const SpotlightTile: FC<Props> = ({
   style,
 }) => {
   const { t } = useTranslation();
-  const [ourRef, root$] = useObservableRef<HTMLDivElement | null>(null);
+  const root$ = useInitial(
+    () => new BehaviorSubject<HTMLDivElement | null>(null),
+  );
+  const ourRef = useCallback(
+    (root: HTMLDivElement | null) => root$.next(root),
+    [root$],
+  );
   const ref = useMergedRefs(ourRef, theirRef);
   const maximised = useBehavior(vm.maximised$);
   const background = useBehavior(vm.background$);

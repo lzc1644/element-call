@@ -8,6 +8,7 @@ import { map, type Observable, of, type SchedulerLike } from "rxjs";
 import { type RunHelpers, TestScheduler } from "rxjs/testing";
 import {
   expect,
+  type Mock,
   type MockedObject,
   type MockInstance,
   onTestFinished,
@@ -25,7 +26,7 @@ import {
 import {
   CallMembership,
   type LivekitFocusSelection,
-  type LivekitTransport,
+  type UnstableLivekitTransport,
   type MatrixRTCSession,
   MatrixRTCSessionEvent,
   type MatrixRTCSessionEventHandlerMap,
@@ -77,7 +78,7 @@ import {
   type RemoteScreenShareViewModel,
 } from "../state/media/RemoteScreenShareViewModel";
 import { Connection } from "../state/CallViewModel/remoteMembers/Connection";
-import { type SFUConfig } from "../livekit/openIDSFU";
+import { type TransportLocator } from "../livekit/auth";
 
 export function withFakeTimers(continuation: () => void): void {
   vi.useFakeTimers();
@@ -208,17 +209,14 @@ export function mockEmitter<T>(): EmitterMock<T> {
   };
 }
 
-export const exampleTransport: LivekitTransport = {
+export const exampleTransport: UnstableLivekitTransport = {
   type: "livekit",
   livekit_service_url: "https://lk.example.org",
-  livekit_alias: "!alias:example.org",
 };
 
-export const exampleSfuConfig: SFUConfig = {
-  jwt: "foo",
-  livekitAlias: "bar",
-  livekitIdentity: "baz",
-  url: "bro",
+export const exampleTransportLocator: TransportLocator = {
+  transport: exampleTransport,
+  serverName: "example.org",
 };
 
 export function mockRtcMembership(
@@ -226,6 +224,8 @@ export function mockRtcMembership(
   deviceId: string,
   customOverwrites?: {
     rtcBackendIdentity?: string;
+    /** Every identity the member may have in LiveKit, when more than one. */
+    backendIdentities?: string[];
     callId?: string;
     fociPreferred?: Transport[];
     focusActive?: LivekitFocusSelection;
@@ -261,11 +261,12 @@ export function mockRtcMembership(
     content: data,
   });
 
-  const membershipData = CallMembership.membershipDataFromMatrixEvent(event);
+  const backendIdentity = rtcBackendIdentity ?? `${userId}:${deviceId}`;
   const cms = new CallMembership(
     event,
-    membershipData,
-    rtcBackendIdentity ?? `${userId}:${deviceId}`,
+    CallMembership.membershipDataFromMatrixEvent(event),
+    customOverwrites?.backendIdentities ?? [backendIdentity],
+    backendIdentity,
   );
   vi.mocked(cms).getTransport = vi.fn().mockReturnValue(fociPreferred[0]);
 
@@ -357,7 +358,7 @@ export function mockLocalMedia(
     participant$: constant(localParticipant),
     encryptionSystem: { kind: E2eeType.PER_PARTICIPANT },
     livekitRoom$: constant(mockLivekitRoom({ localParticipant })),
-    focusUrl$: constant("https://rtc-example.org"),
+    transport$: constant(exampleTransport),
     mediaDevices,
     displayName$: constant(member.rawDisplayName ?? "nodisplayname"),
     mxcAvatarUrl$: constant(member.getMxcAvatarUrl()),
@@ -400,7 +401,7 @@ export function mockRemoteMedia(
     participant$: constant(participant),
     encryptionSystem: { kind: E2eeType.PER_PARTICIPANT },
     livekitRoom$: constant(livekitRoom),
-    focusUrl$: constant("https://rtc-example.org"),
+    transport$: constant(exampleTransport),
     pretendToBeDisconnected$: constant(false),
     displayName$: constant(member.rawDisplayName ?? "nodisplayname"),
     mxcAvatarUrl$: constant(member.getMxcAvatarUrl()),
@@ -427,7 +428,7 @@ export function mockRemoteScreenShare(
     participant$: constant(participant),
     encryptionSystem: { kind: E2eeType.PER_PARTICIPANT },
     livekitRoom$: constant(livekitRoom),
-    focusUrl$: constant("https://rtc-example.org"),
+    transport$: constant(exampleTransport),
     pretendToBeDisconnected$: constant(false),
     displayName$: constant(member.rawDisplayName ?? "nodisplayname"),
     mxcAvatarUrl$: constant(member.getMxcAvatarUrl()),
@@ -472,7 +473,9 @@ export class MockRTCSession extends TypedEventEmitter<
     counters: {},
   };
 
-  public leaveRoomSession: ReturnType<typeof vitest.fn> = vitest
+  public readonly slotId = "m.call#ROOM";
+
+  public leave: ReturnType<typeof vitest.fn> = vitest
     .fn()
     .mockResolvedValue(undefined);
 
@@ -531,7 +534,7 @@ export class MockRTCSession extends TypedEventEmitter<
     if (value !== prev) this.emit(MembershipManagerEvent.ProbablyLeft, value);
   }
 
-  public async joinRTCSession(): Promise<void> {
+  public async join(): Promise<void> {
     return Promise.resolve();
   }
 }
@@ -589,4 +592,99 @@ export function mockMuteStates(
 export class MockConnection extends Connection {
   public async start(): Promise<void> {}
   public async stop(): Promise<void> {}
+}
+
+export interface StubbedCapture {
+  getUserMedia: Mock;
+  /** Grants the microphone, as the browser does once permission is given. */
+  grant: () => void;
+  track: { stop: Mock };
+  contexts: { close: Mock }[];
+  /** Runs the pending animation frames, in order. */
+  drawFrames: (count: number) => void;
+  /** Sets the microphone's loudness from the next frame, 0 to 1. */
+  speak: (amplitude: number) => void;
+}
+
+/**
+ * Stubs the capture and Web Audio APIs, with the grant and the animation
+ * frames driven by the test. Undo with {@link restoreAudioCapture}.
+ */
+export function stubAudioCapture(): StubbedCapture {
+  const track = { stop: vi.fn() };
+  const contexts: { close: Mock }[] = [];
+  let grant = (): void => {};
+  const granted = new Promise<MediaStream>((resolve) => {
+    grant = (): void =>
+      resolve({ getTracks: () => [track] } as unknown as MediaStream);
+  });
+
+  const frames: FrameRequestCallback[] = [];
+  let amplitude = 0;
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    frames.push(callback);
+    return frames.length;
+  });
+  vi.stubGlobal("cancelAnimationFrame", vi.fn());
+  vi.stubGlobal(
+    "AudioContext",
+    class {
+      public readonly state = "running";
+      public readonly close = vi.fn();
+      public constructor() {
+        contexts.push(this);
+      }
+      public createAnalyser(): object {
+        return {
+          fftSize: 1024,
+          getByteTimeDomainData: (samples: Uint8Array): void => {
+            // Silence is the midpoint of the range; a zeroed buffer reads as full scale.
+            if (amplitude <= 0) {
+              samples.fill(128);
+              return;
+            }
+            const peak = Math.round(Math.min(1, amplitude) * 127);
+            for (let i = 0; i < samples.length; i++)
+              samples[i] = 128 + (i % 2 ? peak : -peak);
+          },
+        };
+      }
+      public createMediaStreamSource(): object {
+        return { connect: (): void => {} };
+      }
+    },
+  );
+  // Only this property: replacing navigator loses getters like userAgent.
+  Object.defineProperty(navigator, "mediaDevices", {
+    configurable: true,
+    value: { getUserMedia: vi.fn().mockReturnValue(granted) },
+  });
+
+  return {
+    getUserMedia: navigator.mediaDevices.getUserMedia as unknown as Mock,
+    grant: () => grant(),
+    track,
+    contexts,
+    drawFrames: (count): void => {
+      for (let i = 0; i < count; i++) frames.shift()?.(i);
+    },
+    speak: (next): void => {
+      amplitude = next;
+    },
+  };
+}
+
+const realMediaDevices = Object.getOwnPropertyDescriptor(
+  navigator,
+  "mediaDevices",
+);
+
+/** Undoes {@link stubAudioCapture}. */
+export function restoreAudioCapture(): void {
+  vi.unstubAllGlobals();
+  if (realMediaDevices === undefined) {
+    Reflect.deleteProperty(navigator, "mediaDevices");
+  } else {
+    Object.defineProperty(navigator, "mediaDevices", realMediaDevices);
+  }
 }

@@ -119,7 +119,9 @@ Please see LICENSE in the repository root for full details.
   transform: translateY(calc(100% + var(--cpd-space-6x)));
 }
 
-.footer.overlay:has(:focus-visible) {
+/* Portalled menus keep their trigger expanded while focus is outside the footer. */
+.footer.overlay:has(:focus-visible),
+.footer.overlay:has([aria-expanded="true"]) {
   .toolbar {
     opacity: 1;
     pointer-events: auto;

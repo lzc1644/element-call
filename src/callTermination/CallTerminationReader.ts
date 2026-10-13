@@ -56,26 +56,11 @@ function membershipKey(membership: CallMembership): string {
   return `${membership.userId}\u0000${membership.eventId}`;
 }
 
-/**
- * MatrixRTCSession.memberships is already scoped by the SDK. When an SDK
- * exposes a scope, use it to reject a membership from another slot; use the
- * deprecated callId only as a legacy scope fallback. If neither is available,
- * there is no safe epoch to invent, so retain the SDK's scoped-membership
- * contract rather than broadening it with room membership data.
- */
 function membershipBelongsToSession(
   membership: CallMembership,
   rtcSession: MatrixRTCSession,
 ): boolean {
-  const slotId = rtcSession.slotId;
-  if (slotId !== undefined) return membership.slotId === slotId;
-
-  const callId = rtcSession.callId;
-  if (callId === undefined) return true;
-  return (
-    membership.slotId === `m.call#${callId}` ||
-    (callId === "" && membership.slotId === "m.call#ROOM")
-  );
+  return membership.slotId === rtcSession.slotId;
 }
 
 /**

@@ -97,11 +97,19 @@ export interface ConfigOptions {
     };
   };
 
-  // Describes the LiveKit configuration to be used.
+  /**
+   * Describes the LiveKit configuration to be used.
+   */
   livekit?: {
-    // The link to the service that returns a livekit url and token to use it.
-    // This is a fallback link in case the homeserver in use does not advertise
-    // a livekit service url over the transports endpoint.
+    /**
+     * The link to the service that returns a livekit url and token to use it.
+     * This is a fallback link in case the homeserver in use does not advertise
+     * a livekit service url over the transports endpoint.
+     *
+     * @deprecated Homeservers should advertise available transports over the
+     *   /_matrix/client/unstable/org.matrix.msc4143/rtc/transports endpoint
+     *   instead.
+     */
     livekit_service_url: string;
   };
 
@@ -207,12 +215,6 @@ export interface ConfigOptions {
    * Take care when changing these options.
    */
   matrix_rtc_session?: {
-    /**
-     * How long (in milliseconds) to wait before rotating end-to-end media encryption keys
-     * when someone leaves a call.
-     */
-    wait_for_key_rotation_ms?: number;
-
     /**
      * How long we wait before retrying after a network error on any of the requests.
      */

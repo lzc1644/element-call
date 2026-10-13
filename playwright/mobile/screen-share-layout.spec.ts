@@ -115,6 +115,45 @@ for (const screenShareCase of screenShareCases) {
         });
 
         assertGeometry(measurements, screenShareCase.name);
+
+        const selectedShare = viewerPage.locator(
+          '[data-id][aria-hidden="false"]:has(video[data-lk-source="screen_share"])',
+        );
+        const selectedShareId = await selectedShare.getAttribute("data-id");
+        for (let cycle = 0; cycle < 2; cycle++) {
+          await viewerPage
+            .getByRole("button", { name: "Expand", exact: true })
+            .click();
+          const expandedCall = viewerPage.locator(
+            '[data-layout="spotlight-expanded"]',
+          );
+          await expect(expandedCall).toHaveAttribute(
+            "data-members-hidden",
+            "true",
+          );
+          await expect(selectedShare).toHaveAttribute(
+            "data-id",
+            selectedShareId!,
+          );
+          await expect(selectedShare.locator("video")).toBeInViewport();
+          await viewerPage
+            .getByRole("button", { name: "Collapse", exact: true })
+            .click();
+          await expect(callView).toHaveAttribute(
+            "data-members-hidden",
+            "false",
+          );
+          await expect(selectedShare).toHaveAttribute(
+            "data-id",
+            selectedShareId!,
+          );
+          await expect(selectedShare.locator("video")).toBeInViewport();
+          await expect(
+            callView
+              .locator('[data-scrollable="true"]')
+              .getByTestId("videoTile"),
+          ).toHaveCount(2);
+        }
       },
     );
   });

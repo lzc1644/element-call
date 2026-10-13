@@ -17,6 +17,7 @@ import { SpotlightTileViewModel } from "../state/TileViewModel";
 import { constant } from "../state/Behavior";
 import { createVolumeControls } from "../state/VolumeControls";
 import { type RemoteScreenShareViewModel } from "../state/media/RemoteScreenShareViewModel";
+import { EncryptionStatus } from "../state/media/MemberMediaViewModel";
 
 function SpotlightStory({
   audio,
@@ -204,7 +205,8 @@ function remoteShare(
     video$: constant(undefined),
     videoEnabled$: constant(true),
     unencryptedWarning$: constant(false),
-    focusUrl$: constant(undefined),
+    encryptionStatus$: constant(EncryptionStatus.Okay),
+    transport$: constant(undefined),
     audioEnabled$: constant(audio),
     ...createVolumeControls(scope, {
       pretendToBeDisconnected$: constant(false),

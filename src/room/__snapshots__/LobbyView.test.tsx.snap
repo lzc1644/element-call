@@ -15,7 +15,7 @@ exports[`LobbyView > renders with AppBar android 1`] = `
         tabindex="0"
       >
         <div
-          class="_indicator-icon_147l5_17"
+          class="_indicator-icon_j097f_17"
           style="--cpd-icon-button-size: 100%;"
         >
           <svg
@@ -96,6 +96,7 @@ exports[`LobbyView > renders with AppBar android 1`] = `
     </div>
     <div
       class="_footer_20b7b4"
+      data-controls-visible="true"
       data-testid="footer-container"
     >
       <div
@@ -114,7 +115,7 @@ exports[`LobbyView > renders with AppBar android 1`] = `
             tabindex="0"
           >
             <div
-              class="_indicator-icon_147l5_17"
+              class="_indicator-icon_j097f_17"
               style="--cpd-icon-button-size: 100%;"
             >
               <svg
@@ -251,7 +252,7 @@ exports[`LobbyView > renders with AppBar ios 1`] = `
         tabindex="0"
       >
         <div
-          class="_indicator-icon_147l5_17"
+          class="_indicator-icon_j097f_17"
           style="--cpd-icon-button-size: 100%;"
         >
           <svg
@@ -332,6 +333,7 @@ exports[`LobbyView > renders with AppBar ios 1`] = `
     </div>
     <div
       class="_footer_20b7b4"
+      data-controls-visible="true"
       data-testid="footer-container"
     >
       <div
@@ -350,7 +352,7 @@ exports[`LobbyView > renders with AppBar ios 1`] = `
             tabindex="0"
           >
             <div
-              class="_indicator-icon_147l5_17"
+              class="_indicator-icon_j097f_17"
               style="--cpd-icon-button-size: 100%;"
             >
               <svg
@@ -614,6 +616,7 @@ exports[`LobbyView > renders with header and participant count 1`] = `
     </div>
     <div
       class="_footer_20b7b4"
+      data-controls-visible="true"
       data-testid="footer-container"
     >
       <div
@@ -632,7 +635,7 @@ exports[`LobbyView > renders with header and participant count 1`] = `
             tabindex="0"
           >
             <div
-              class="_indicator-icon_147l5_17"
+              class="_indicator-icon_j097f_17"
               style="--cpd-icon-button-size: 100%;"
             >
               <svg
