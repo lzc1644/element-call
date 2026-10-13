@@ -256,9 +256,9 @@ function runReaderTests(eventType: string): void {
     expect(onTermination).not.toHaveBeenCalled();
   });
 
-  test("uses the deprecated callId only as a scope fallback", () => {
+  test("rejects participants from another MatrixRTC slot", () => {
     const { rtcSession } = getBasicRTCSession([local, alice]);
-    Object.assign(rtcSession, { callId: "another-call" });
+    Object.assign(rtcSession, { slotId: "m.call#another-call" });
     const reader = new CallTerminationReader(
       testScope(),
       rtcSession.asMockedSession(),

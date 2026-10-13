@@ -1,6 +1,6 @@
 import { defineConfig, mergeConfig } from "vitest/config";
 import { playwright } from "@vitest/browser-playwright";
-import { vitePluginsConfig } from "./vite.config";
+import { vitePluginsConfig } from "./vite.config.ts";
 import { storybookTest } from "@storybook/addon-vitest/vitest-plugin";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,6 +25,7 @@ export default defineConfig((configEnv) =>
                 "src/**/*.test.ts",
                 "src/**/*.test.tsx",
                 "component/**/*.test.ts",
+                "component/**/*.test.tsx",
               ],
             },
           },

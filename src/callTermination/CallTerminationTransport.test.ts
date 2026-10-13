@@ -7,6 +7,7 @@ Please see LICENSE in the repository root for full details.
 
 import {
   createRoomWidgetClient,
+  EventStatus,
   type IEvent,
   type IRoomTimelineData,
   type MatrixClient,
@@ -14,7 +15,15 @@ import {
   RoomEvent as MatrixRoomEvent,
   type Room as MatrixRoom,
 } from "matrix-js-sdk";
-import { WidgetApi, WidgetApiToWidgetAction } from "matrix-widget-api";
+import {
+  type ISendEventFromWidgetRequestData,
+  type IWidgetApiRequestData,
+  type IWidgetApiResponseData,
+  WidgetApi,
+  type WidgetApiAction,
+  WidgetApiFromWidgetAction,
+  WidgetApiToWidgetAction,
+} from "matrix-widget-api";
 import { expect, onTestFinished, test, vi } from "vitest";
 
 import {
@@ -41,7 +50,8 @@ import { ReactionsReader } from "../reactions/ReactionsReader";
 const nativeCallEventTypes = new Set(["io.element.call.reaction"]);
 
 test("native widget rejects the old custom type but sends the shared envelope to a web participant", async () => {
-  const { client, room, sentEvents } = await createNativeWidgetClient();
+  const { client, room, sentEvents, requests } =
+    await createNativeWidgetClient();
   await expect(
     client.sendEvent(
       room.roomId,
@@ -59,7 +69,16 @@ test("native widget rejects the old custom type but sends the shared envelope to
     room.roomId,
     CallTerminationEventType,
     createCallTerminationContent(localRtcMember.userId),
+    "termination",
   );
+  // Exercise WidgetApi's real request assembly: native hosts must see a normal
+  // message-like send, without state_key, delay or sticky-event options.
+  expect(requests.at(-1)).toEqual({
+    type: CallTerminationEventType,
+    content: sentEvents[0].content,
+    room_id: room.roomId,
+  });
+  expect(room.getEventForTxnId("termination")?.status).toBe(EventStatus.SENT);
   expect(sentEvents).toHaveLength(1);
   expect(sentEvents[0].type).toBe("io.element.call.reaction");
 
@@ -177,31 +196,48 @@ async function createNativeWidgetClient(): Promise<{
   client: MatrixClient;
   room: MatrixRoom;
   sentEvents: Partial<IEvent>[];
+  requests: ISendEventFromWidgetRequestData[];
   receive: (event: Partial<IEvent>) => Promise<boolean>;
 }> {
   const roomId = "!native-call:example.org";
   const api = new WidgetApi("native-widget", "https://host.example.org");
   const sentEvents: Partial<IEvent>[] = [];
+  const requests: ISendEventFromWidgetRequestData[] = [];
   vi.spyOn(api, "start").mockImplementation(() => {
     api.emit("ready");
   });
   vi.spyOn(api, "getClientVersions").mockResolvedValue([]);
   vi.spyOn(api.transport, "reply").mockImplementation(() => {});
-  vi.spyOn(api, "sendRoomEvent").mockImplementation(async (type, content) => {
-    if (!nativeCallEventTypes.has(type))
-      throw new Error("Not allowed to send event");
-    const event_id = `$native-${sentEvents.length}:example.org`;
-    sentEvents.push({
-      room_id: roomId,
-      event_id,
-      sender: localRtcMember.userId,
-      origin_server_ts: Date.now(),
-      type,
-      content: content as IEvent["content"],
-    });
-    await Promise.resolve();
-    return { room_id: roomId, event_id };
-  });
+  vi.spyOn(api.transport, "send").mockImplementation(
+    async <T extends IWidgetApiRequestData, R extends IWidgetApiResponseData>(
+      action: WidgetApiAction,
+      data: T,
+    ): Promise<R> => {
+      expect(action).toBe(WidgetApiFromWidgetAction.SendEvent);
+      // The generic transport boundary is narrowed to send_event above.
+      const request = data as unknown as ISendEventFromWidgetRequestData;
+      requests.push(request);
+      if (!nativeCallEventTypes.has(request.type))
+        throw new Error("Not allowed to send event");
+      const event_id = `$native-${sentEvents.length}:example.org`;
+      sentEvents.push({
+        room_id: roomId,
+        event_id,
+        sender: localRtcMember.userId,
+        origin_server_ts: Date.now(),
+        type: request.type,
+        content: request.content as IEvent["content"],
+      });
+      // Rust serializes the absent optional delay_id as null, not undefined.
+      const response: IWidgetApiResponseData = {
+        room_id: roomId,
+        event_id,
+        delay_id: null,
+      };
+      await Promise.resolve();
+      return response as R;
+    },
+  );
   const client = createRoomWidgetClient(
     api,
     {
@@ -239,5 +275,5 @@ async function createNativeWidgetClient(): Promise<{
     return true;
   }
 
-  return { client, room, sentEvents, receive };
+  return { client, room, sentEvents, requests, receive };
 }

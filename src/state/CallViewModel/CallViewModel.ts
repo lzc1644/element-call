@@ -12,18 +12,19 @@ import {
   ExternalE2EEKeyProvider,
   type Room as LivekitRoom,
   type RoomOptions,
+  type RemoteParticipant,
 } from "livekit-client";
 import { type MatrixClient, type Room as MatrixRoom } from "matrix-js-sdk";
 import { EventStatus, type MatrixEvent } from "matrix-js-sdk/lib/models/event";
 import {
   BehaviorSubject,
-  catchError,
   combineLatest,
   distinctUntilChanged,
   filter,
   fromEvent,
   map,
   merge,
+  NEVER,
   type Observable,
   of,
   pairwise,
@@ -31,7 +32,6 @@ import {
   scan,
   startWith,
   Subject,
-  switchAll,
   switchMap,
   switchScan,
   shareReplay,
@@ -40,11 +40,15 @@ import {
   throttleTime,
   timer,
   takeUntil,
+  from,
+  concatWith,
+  catchError,
+  switchAll,
 } from "rxjs";
 import { type Logger, logger as rootLogger } from "matrix-js-sdk/lib/logger";
 import {
   MembershipManagerEvent,
-  type LivekitTransportConfig,
+  type UnstableLivekitTransport,
   type MatrixRTCSession,
   type RTCCallIntent,
   type RTCNotificationType,
@@ -57,6 +61,7 @@ import {
   createToggle$,
   filterBehavior,
   generateItems,
+  mapScoped,
   pauseWhen,
 } from "../../utils/observable";
 import {
@@ -84,6 +89,7 @@ import {
   type ReactionOption,
 } from "../../reactions";
 import { shallowEquals as shallowArrayEquals } from "../../utils/array";
+import { shallowEquals as shallowObjectEquals } from "../../utils/object";
 import { type MediaDevices } from "../MediaDevices";
 import { constant, type Behavior } from "../Behavior";
 import { E2eeType } from "../../e2ee/e2eeType";
@@ -99,29 +105,26 @@ import {
 } from "../../callTermination";
 import { CallTerminationReader } from "../../callTermination/CallTerminationReader";
 import {
-  layoutShallowEquals,
   type Alignment,
-  type GridLayoutMedia,
   type Layout,
   type LayoutMedia,
-  type OneOnOneDesktopLayoutMedia,
-  type OneOnOneMobileLayoutMedia,
-  type SpotlightExpandedLayoutMedia,
-  type SpotlightLandscapeLayoutMedia,
-  type SpotlightPortraitLayoutMedia,
+  type WindowMode,
 } from "../layout-types.ts";
+import {
+  chooseSpotlightSpeaker,
+  computeLayoutMedia,
+  computeSpotlight,
+  type OneOnOneMedia,
+} from "../layoutMedia.ts";
 import { ElementCallError, UnknownCallError } from "../../utils/errors.ts";
-import { type Epoch, type ObservableScope } from "../ObservableScope.ts";
+import { Epoch, type ObservableScope } from "../ObservableScope.ts";
 import { createHomeserverConnected$ } from "./localMember/HomeserverConnected.ts";
 import {
   createLocalMembership$,
   enterRTCSession,
   TransportState,
 } from "./localMember/LocalMember.ts";
-import {
-  createLocalTransport$,
-  type LocalTransport,
-} from "./localMember/LocalTransport.ts";
+import { getLocalTransport } from "./localMember/LocalTransport.ts";
 import {
   createKeyRotationSuppressed$,
   createMemberships$,
@@ -132,9 +135,9 @@ import {
   ECConnectionFactory,
 } from "./remoteMembers/ConnectionFactory.ts";
 import {
-  type ConnectionManagerData,
-  createConnectionManager$,
-} from "./remoteMembers/ConnectionManager.ts";
+  ConnectionMap,
+  createConnectionMap$,
+} from "./remoteMembers/ConnectionMap.ts";
 import {
   createRemoteMatrixLivekitMembers$,
   type LocalMatrixLivekitMember,
@@ -170,6 +173,7 @@ import {
   type RingingMediaViewModel,
 } from "../media/RingingMediaViewModel.ts";
 import { type GridTileViewModel } from "../TileViewModel.ts";
+import { type TransportLocator } from "../../livekit/auth";
 
 //TODO
 // Larger rename
@@ -222,7 +226,7 @@ export interface CallViewModelOptions {
    */
   windowSize$: Behavior<{ width: number; height: number }>;
   /** Optional value overriding the local transport, for testing purposes. */
-  localTransport?: LocalTransport;
+  localTransport?: TransportLocator;
   /** Optional value overriding the connection factory, for testing purposes. */
   connectionFactory?: ConnectionFactory;
   /** The version & compatibility mode of MatrixRTC that we should use. */
@@ -285,19 +289,9 @@ export function callViewModelOptionsFromParams(
 export const MAX_PARTICIPANT_COUNT_FOR_SOUND = 8;
 export const THROTTLE_SOUND_EFFECT_MS = 500;
 
-// This is the number of participants that we think constitutes a "small" call
-// on mobile. No spotlight tile should be shown below this threshold.
-const smallMobileCallThreshold = 3;
-
-// 用户要求减少视频被遮挡的时间，工具栏从初始展示或最后一次交互起仅保持三秒可见。
+// How long the footer should be shown for when hovering over or interacting
+// with the interface
 const showFooterMs = 3000;
-
-/**
- * The general shape of the space the call is drawn in. Called a window because
- * that is what it is in the standalone app; for a component it is the container
- * the host gave us, which may be a small corner of a large window.
- */
-export type WindowMode = "normal" | "narrow" | "flat" | "pip";
 
 interface LayoutScanState {
   layout: Layout | null;
@@ -308,7 +302,7 @@ interface LayoutScanState {
 export type LivekitRoomItem = {
   livekitRoom: LivekitRoom;
   participants: string[];
-  url: string;
+  transport: TransportLocator;
 };
 
 /**
@@ -409,7 +403,7 @@ export interface CallViewModel {
    * key is generated when someone joins or leaves.
    */
   keyRotationSuppressed$: Behavior<boolean>;
-  allConnections$: Behavior<ConnectionManagerData>;
+  allConnections$: Behavior<Connection[]>;
   /** Participants sorted by livekit room so they can be used in the audio rendering */
   livekitRoomItems$: Behavior<LivekitRoomItem[]>;
   /** use the layout instead, this is just for the sdk export. */
@@ -608,22 +602,16 @@ export function createCallViewModel$(
         : `${userId}:${deviceId}`,
   };
 
-  const localTransport =
-    options.localTransport ??
-    createLocalTransport$({
-      scope: scope,
-      memberships$: memberships$,
-      ownMembershipIdentity,
-      client,
-      roomId: matrixRoom.roomId,
-      matrixRTCMode,
-    });
+  const localTransport$ = options.localTransport
+    ? constant(options.localTransport)
+    : from(getLocalTransport(client));
 
   const connectionFactory =
     options.connectionFactory ??
     new ECConnectionFactory(
       client,
       matrixRoom.roomId,
+      matrixRTCSession.slotId,
       mediaDevices,
       trackProcessorState$,
       livekitKeyProvider,
@@ -631,24 +619,24 @@ export function createCallViewModel$(
       options.livekitRoomFactory,
     );
 
-  const connectionManager = createConnectionManager$({
-    scope: scope,
-    connectionFactory: connectionFactory,
-    localTransport$: scope.behavior(
-      localTransport.active$.pipe(
-        catchError((e: unknown) => {
-          logger.info(
-            "could not pass local transport to createConnectionManager$. localTransport$ threw an error",
-            e,
-          );
-          return of(null);
+  const connectionMap$ = scope.behavior<Epoch<ConnectionMap>>(
+    localTransport$.pipe(
+      catchError(() => NEVER), // Swallow errors
+      concatWith(NEVER), // So the Observable doesn't complete prematurely
+      mapScoped("connectionMap$", (localTransport, scope) =>
+        createConnectionMap$({
+          scope,
+          connectionFactory,
+          localTransport,
+          remoteTransports$: membershipsAndTransports.transports$,
+          logger,
+          ownMembershipIdentity,
         }),
       ),
+      switchAll(),
     ),
-    remoteTransports$: membershipsAndTransports.transports$,
-    logger: logger,
-    ownMembershipIdentity,
-  });
+    new Epoch(new ConnectionMap()),
+  );
 
   const remoteMatrixLivekitMembers$: Behavior<
     Epoch<RemoteMatrixLivekitMember[]>
@@ -656,7 +644,7 @@ export function createCallViewModel$(
     scope: scope,
     membershipsWithTransport$:
       membershipsAndTransports.membershipsWithTransport$,
-    connectionManager: connectionManager,
+    connectionMap$,
     localUser: { userId, deviceId },
   });
 
@@ -669,7 +657,7 @@ export function createCallViewModel$(
     ),
     muteStates,
     joinMatrixRTC: (
-      transport: LivekitTransportConfig,
+      transport: UnstableLivekitTransport,
       delayedLeaveTimings: ResolvedDelayedLeaveTimings,
     ) => {
       return enterRTCSession(
@@ -691,16 +679,14 @@ export function createCallViewModel$(
         mediaDevices,
         muteStates,
         trackProcessorState$,
-        logger.getChild(
-          "[Publisher " + connection.transport.livekit_service_url + "]",
-        ),
+        logger.getChild(`[Publisher ${JSON.stringify(connection.transport)}]`),
         controlledAudioDevices,
       );
     },
-    connectionManager,
+    connectionMap$,
     client,
     matrixRTCSession,
-    localTransport,
+    localTransport$,
     roomId: matrixRoom.roomId,
     hideScreensharing,
     hostBridge,
@@ -716,7 +702,6 @@ export function createCallViewModel$(
       ).pipe(map(([delayId]) => delayId ?? null)),
       matrixRTCSession.delayId ?? null,
     ),
-    matrixRTCMode,
     logger: logger.getChild(`[${Date.now()}]`),
   });
 
@@ -784,51 +769,47 @@ export function createCallViewModel$(
   });
 
   const allConnections$ = scope.behavior(
-    connectionManager.connectionManagerData$.pipe(map((d) => d.value)),
+    connectionMap$.pipe(map((d) => d.value.getConnections())),
   );
-  const livekitRoomItems$ = scope.behavior(
-    remoteMatrixLivekitMembers$.pipe(
-      switchMap((members) => {
-        const a$ = combineLatest(
-          members.value.map((member) =>
-            combineLatest([member.connection$, member.participant.value$]).pipe(
-              map(([connection, participant]) => {
-                // do not render audio for local participant
-                if (!connection || !participant || participant.isLocal)
-                  return null;
-                const livekitRoom = connection.livekitRoom;
-                const url = connection.transport.livekit_service_url;
 
-                return {
-                  url,
-                  livekitRoom,
-                  participant: participant.identity,
-                };
-              }),
+  const livekitRoomItems$ = scope.behavior<LivekitRoomItem[]>(
+    remoteMatrixLivekitMembers$.pipe(
+      // Flatten the members to a snapshot of their current connections and
+      // participant objects
+      switchMap(({ value: members }) => {
+        if (members.length === 0) return of([]);
+        return combineLatest(
+          members.map((m) =>
+            combineLatest(
+              [m.connection$, m.participant.value$],
+              (connection, participant) => ({ connection, participant }),
             ),
           ),
         );
-        return a$;
       }),
+      // Keep only those with a defined connection and participant
       map((members) =>
-        members.reduce<LivekitRoomItem[]>((acc, curr) => {
-          if (!curr) return acc;
-
-          const existing = acc.find((item) => item.url === curr.url);
-          if (existing) {
-            existing.participants.push(curr.participant);
-          } else {
-            acc.push({
-              livekitRoom: curr.livekitRoom,
-              participants: [curr.participant],
-              url: curr.url,
-            });
-          }
-          return acc;
-        }, []),
+        members.filter(
+          (
+            m,
+          ): m is { connection: Connection; participant: RemoteParticipant } =>
+            m.connection !== null && m.participant !== null,
+        ),
+      ),
+      // Group members by connection
+      map((members) =>
+        [...Map.groupBy(members, (m) => m.connection)].map(
+          ([connection, members]) => ({
+            transport: {
+              transport: connection.transport,
+              serverName: connection.serverName,
+            },
+            livekitRoom: connection.livekitRoom,
+            participants: members.map((m) => m.participant.identity),
+          }),
+        ),
       ),
     ),
-    [],
   );
 
   const handsRaised$ = scope.behavior(
@@ -885,8 +866,8 @@ export function createCallViewModel$(
             livekitRoom$: scope.behavior(
               connection$.pipe(map((c) => c?.livekitRoom)),
             ),
-            focusUrl$: scope.behavior(
-              connection$.pipe(map((c) => c?.transport.livekit_service_url)),
+            transport$: scope.behavior(
+              connection$.pipe(map((c) => c?.transport)),
             ),
             mediaDevices,
             pretendToBeDisconnected$: localMembership.reconnecting$,
@@ -1093,33 +1074,16 @@ export function createCallViewModel$(
         mediaItems.length === 0
           ? of([])
           : combineLatest(
-              mediaItems.map((m) =>
-                m.speaking$.pipe(map((s) => [m, s] as const)),
+              mediaItems.map((media) =>
+                media.speaking$.pipe(map((speaking) => ({ media, speaking }))),
               ),
             ),
       ),
       scan<
-        (readonly [UserMediaViewModel, boolean])[],
+        { media: UserMediaViewModel; speaking: boolean }[],
         UserMediaViewModel | undefined,
         undefined
-      >((prev, mediaItems) => {
-        // Only remote users that are still in the call should be sticky
-        const [stickyMedia, stickySpeaking] =
-          (!prev?.local && mediaItems.find(([m]) => m === prev)) || [];
-        // Decide who to spotlight:
-        // If the previous speaker is still speaking, stick with them rather
-        // than switching eagerly to someone else
-        return stickySpeaking
-          ? stickyMedia!
-          : // Otherwise, select any remote user who is speaking
-            (mediaItems.find(([m, s]) => !m.local && s)?.[0] ??
-              // Otherwise, stick with the person who was last speaking
-              stickyMedia ??
-              // Otherwise, spotlight an arbitrary remote user
-              mediaItems.find(([m]) => !m.local)?.[0] ??
-              // Otherwise, spotlight the local user
-              mediaItems.find(([m]) => m.local)?.[0]);
-      }, undefined),
+      >(chooseSpotlightSpeaker, undefined),
     ),
   );
 
@@ -1163,33 +1127,12 @@ export function createCallViewModel$(
     ),
   );
 
-  const spotlightAndPip$ = scope.behavior<{
-    spotlight: MediaViewModel[];
-    pip$: Observable<UserMediaViewModel | undefined>;
-  }>(
-    ringingMedia$.pipe(
-      switchMap((ringingMedia) => {
-        if (ringingMedia !== null)
-          return of({ spotlight: [ringingMedia], pip$: localUserMediaForPip$ });
-
-        return screenShares$.pipe(
-          switchMap((screenShares) => {
-            if (screenShares.length > 0)
-              return of({ spotlight: screenShares, pip$: spotlightSpeaker$ });
-
-            return spotlightSpeaker$.pipe(
-              map((speaker) => ({
-                spotlight: speaker ? [speaker] : [],
-                // Hide PiP if redundant (i.e. if local user is already in spotlight)
-                pip$: localUserMediaForPip$.pipe(
-                  map((m) => (m === speaker ? undefined : m)),
-                ),
-              })),
-            );
-          }),
-        );
-      }),
-    ),
+  const spotlightAndPip$ = scope.behavior(
+    combineLatest(
+      [ringingMedia$, screenShares$, spotlightSpeaker$, localUserMediaForPip$],
+      (ringing, screenShares, speaker, localPip) =>
+        computeSpotlight({ ringing, screenShares, speaker, localPip }),
+    ).pipe(distinctUntilChanged(shallowObjectEquals)),
   );
 
   const spotlight$ = scope.behavior<MediaViewModel[]>(
@@ -1247,56 +1190,7 @@ export function createCallViewModel$(
     hasRemoteScreenShares$,
   );
 
-  const gridLayoutMedia$: Observable<GridLayoutMedia> = combineLatest(
-    [grid$, spotlight$],
-    (grid, spotlight) => ({
-      type: "grid",
-      edgeToEdge: false,
-      spotlight: spotlight.some((vm) => vm.type === "screen share")
-        ? spotlight
-        : undefined,
-      grid,
-    }),
-  );
-
-  const spotlightLandscapeLayoutMedia$ = (
-    edgeToEdge: boolean,
-  ): Observable<SpotlightLandscapeLayoutMedia> =>
-    combineLatest([grid$, spotlight$], (grid, spotlight) => ({
-      type: "spotlight-landscape",
-      edgeToEdge,
-      spotlight,
-      grid,
-    }));
-
-  const spotlightPortraitLayoutMedia$: Observable<SpotlightPortraitLayoutMedia> =
-    combineLatest([grid$, spotlight$], (grid, spotlight) => ({
-      type: "spotlight-portrait",
-      edgeToEdge: false,
-      spotlight,
-      grid,
-    }));
-
-  const spotlightExpandedLayoutMedia$ = (
-    edgeToEdge: boolean,
-  ): Observable<SpotlightExpandedLayoutMedia> =>
-    spotlightAndPip$.pipe(
-      switchMap(({ spotlight, pip$ }) =>
-        pip$.pipe(
-          map((pip) => ({
-            type: "spotlight-expanded" as const,
-            edgeToEdge,
-            spotlight,
-            pip: pip ?? undefined,
-          })),
-        ),
-      ),
-    );
-
-  const oneOnOneLayoutMedia$: Behavior<{
-    local: LocalUserMediaViewModel;
-    remote: UserMediaViewModel | RingingMediaViewModel;
-  } | null> = scope.behavior(
+  const oneOnOneLayoutMedia$: Behavior<OneOnOneMedia | null> = scope.behavior(
     combineLatest([userMedia$, screenShares$]).pipe(
       switchMap(([userMedia, screenShares]) => {
         // One-on-one layout only supports 2 user media, no screen shares
@@ -1334,47 +1228,12 @@ export function createCallViewModel$(
     ),
   );
 
-  const oneOnOneDesktopLayoutMedia$: Observable<OneOnOneDesktopLayoutMedia | null> =
+  const localVideoEnabled$ = scope.behavior<boolean>(
     oneOnOneLayoutMedia$.pipe(
-      map((media) => {
-        if (media === null) return null;
-        return media.remote.type === "ringing"
-          ? {
-              type: "one-on-one-desktop" as const,
-              edgeToEdge: false,
-              spotlight: media.local,
-              pip: media.remote,
-            }
-          : {
-              type: "one-on-one-desktop" as const,
-              edgeToEdge: false,
-              spotlight: media.remote,
-              pip: media.local,
-            };
-      }),
-    );
-
-  const oneOnOneMobileLayoutMedia$: Observable<OneOnOneMobileLayoutMedia | null> =
-    oneOnOneLayoutMedia$.pipe(
-      switchMap((media) => {
-        if (media === null) return of(null);
-        return media.local.videoEnabled$.pipe(
-          map((videoEnabled) => ({
-            type: "one-on-one-mobile" as const,
-            edgeToEdge: true as const,
-            spotlight: media.remote,
-            pip: videoEnabled ? media.local : undefined,
-          })),
-        );
-      }),
-    );
-
-  const pipLayoutMedia$: Observable<LayoutMedia> = spotlight$.pipe(
-    map((spotlight) => ({
-      type: "pip",
-      edgeToEdge: platform !== "desktop",
-      spotlight,
-    })),
+      switchMap((media) =>
+        media === null ? of(false) : media.local.videoEnabled$,
+      ),
+    ),
   );
 
   spotlight$
@@ -1409,72 +1268,38 @@ export function createCallViewModel$(
    * The media to be used to produce a layout.
    */
   const layoutMedia$ = scope.behavior<LayoutMedia>(
-    windowMode$.pipe(
-      switchMap((windowMode) => {
-        switch (windowMode) {
-          case "normal":
-            return layoutSwitchVm.layout$.pipe(
-              switchMap((layout) => {
-                switch (layout) {
-                  case "grid":
-                    return oneOnOneDesktopLayoutMedia$.pipe(
-                      switchMap((oneOnOne) =>
-                        oneOnOne === null ? gridLayoutMedia$ : of(oneOnOne),
-                      ),
-                    );
-                  case "spotlight":
-                    return spotlightExpanded$.pipe(
-                      switchMap((expanded) =>
-                        expanded
-                          ? spotlightExpandedLayoutMedia$(false)
-                          : spotlightLandscapeLayoutMedia$(false),
-                      ),
-                    );
-                }
-              }),
-            );
-          case "narrow":
-            return oneOnOneMobileLayoutMedia$.pipe(
-              switchMap((oneOnOne) =>
-                oneOnOne === null
-                  ? combineLatest([grid$, spotlight$], (grid, spotlight) =>
-                      grid.length > smallMobileCallThreshold ||
-                      spotlight.some((vm) => vm.type === "screen share")
-                        ? spotlightExpanded$.pipe(
-                            switchMap((expanded) =>
-                              expanded
-                                ? spotlightExpandedLayoutMedia$(false)
-                                : spotlightPortraitLayoutMedia$,
-                            ),
-                          )
-                        : gridLayoutMedia$,
-                    ).pipe(switchAll())
-                  : of(oneOnOne),
-              ),
-            );
-          case "flat":
-            return oneOnOneMobileLayoutMedia$.pipe(
-              switchMap((oneOnOne) =>
-                oneOnOne === null
-                  ? layoutSwitchVm.layout$.pipe(
-                      switchMap((layout) => {
-                        switch (layout) {
-                          case "grid":
-                            // Yes, grid mode actually gets you a "spotlight" layout in
-                            // this window mode.
-                            return spotlightLandscapeLayoutMedia$(true);
-                          case "spotlight":
-                            return spotlightExpandedLayoutMedia$(true);
-                        }
-                      }),
-                    )
-                  : of(oneOnOne),
-              ),
-            );
-          case "pip":
-            return pipLayoutMedia$;
-        }
-      }),
+    // We deliberately don't use combineLatest here. Several of the inputs
+    // below derive from the same source. So one upstream change cascades
+    // through them one at a time. combineLatest would see each step of the
+    // cascade and emit layouts built from inputs that never coexisted.
+    // Instead, we treat the emissions as a mere "something changed" signal
+    // and read every input's current value. The derived behaviors were
+    // subscribed before this one and a BehaviorSubject updates its value
+    // before notifying. So by the time the first signal arrives every value
+    // is already consistent. The duplicate signals from the rest of the
+    // cascade are dropped by distinctUntilChanged.
+    merge(
+      windowMode$,
+      layoutSwitchVm.layout$,
+      spotlightExpanded$,
+      oneOnOneLayoutMedia$,
+      localVideoEnabled$,
+      spotlightAndPip$,
+      grid$,
+    ).pipe(
+      map(() =>
+        computeLayoutMedia({
+          windowMode: windowMode$.value,
+          layoutMode: layoutSwitchVm.layout$.value,
+          spotlightExpanded: spotlightExpanded$.value,
+          oneOnOne: oneOnOneLayoutMedia$.value,
+          localVideoEnabled: localVideoEnabled$.value,
+          ...spotlightAndPip$.value,
+          grid: grid$.value,
+          desktop: platform === "desktop",
+        }),
+      ),
+      distinctUntilChanged(shallowObjectEquals<LayoutMedia>),
     ),
   );
 
@@ -1778,7 +1603,7 @@ export function createCallViewModel$(
     layoutInternals$.pipe(
       map(({ layout }) => layout),
       // Drop redundant layout updates before they would hit React.
-      distinctUntilChanged<Layout>(layoutShallowEquals),
+      distinctUntilChanged(shallowObjectEquals<Layout>),
     ),
   );
 
@@ -1944,9 +1769,9 @@ export function createCallViewModel$(
           returnObject.publishError = value.media;
         else if (
           typeof value.media === "object" &&
-          value.media.connection instanceof ElementCallError
+          value.media.connection.state === "error"
         )
-          returnObject.connectionError = value.media.connection;
+          returnObject.connectionError = value.media.connection.error;
         return returnObject;
       }),
     ),

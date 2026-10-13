@@ -61,6 +61,9 @@ widgetTest("Sharing screen in group call", async ({ addUser, browserName }) => {
     await TestHelpers.acceptRoomInvite(roomName, user.page);
   }
 
+  await TestHelpers.createRoom("Other Room", carol.page);
+  await TestHelpers.switchToRoomNamed(carol.page, roomName);
+
   await TestHelpers.startCallInCurrentRoom(alice.page, false);
   await approveWidgetPermissions(alice.page);
   await expect(alice.page.locator('iframe[title="Element Call"]')).toBeVisible({
@@ -135,7 +138,8 @@ widgetTest("Sharing screen in group call", async ({ addUser, browserName }) => {
   ).not.toBeVisible();
 
   // Moving to another room puts the share in a floating PiP with a real video area.
-  await TestHelpers.createRoom("Other Room", carol.page);
+  await TestHelpers.expandRoomList(carol.page);
+  await TestHelpers.switchToRoomNamed(carol.page, "Other Room");
   await expect(carol.page.getByTestId("widget-pip-container")).toBeVisible();
   await expect(carolFrame.locator("[data-layout]")).toHaveAttribute(
     "data-layout",
@@ -151,7 +155,6 @@ widgetTest("Sharing screen in group call", async ({ addUser, browserName }) => {
   await expect(
     carolFrame.locator('video[data-lk-source="camera"]'),
   ).toHaveCount(0);
-  await TestHelpers.expandRoomList(carol.page);
   await TestHelpers.switchToRoomNamed(carol.page, roomName);
   await expect(carolFrame.locator("[data-layout]")).not.toHaveAttribute(
     "data-layout",
@@ -264,10 +267,11 @@ widgetTest("Sharing screen in group call", async ({ addUser, browserName }) => {
     // There should be a prev button now, but no third (camera) page.
     await expect(frame.getByRole("button", { name: "Back" })).toBeVisible();
     await expect(frame.getByRole("button", { name: "Next" })).not.toBeVisible();
-    const visibleShare = spotlightItems
-      .locator('video[data-lk-source="screen_share"]')
-      .filter({ visible: true });
+    const visibleShare = frame.locator(
+      '[data-id][aria-hidden="false"] video[data-lk-source="screen_share"]',
+    );
     await expect(visibleShare).toHaveCount(1);
+    await expect(visibleShare).toBeInViewport();
     await expect(
       frame.locator('video[data-lk-source="camera"]').filter({ visible: true }),
     ).toHaveCount(3);

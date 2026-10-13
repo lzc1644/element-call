@@ -6,12 +6,12 @@ Please see LICENSE in the repository root for full details.
 */
 
 import { type ReactNode } from "react";
-import { useObservableEagerState } from "observable-hooks";
 
 import { type CallLayout } from "./CallLayout";
 import { type SpotlightLandscapeLayout as SpotlightLandscapeLayoutModel } from "../state/layout-types.ts";
 import styles from "./SpotlightLandscapeLayout.module.css";
 import { useUpdateLayout, useVisibleTiles } from "./Grid";
+import { useBehavior } from "../useBehavior";
 
 /**
  * An implementation of the "spotlight landscape" layout, in which the spotlight
@@ -29,7 +29,7 @@ export const makeSpotlightLandscapeLayout: CallLayout<
     Slot,
   }): ReactNode {
     useUpdateLayout();
-    useObservableEagerState(minBounds$);
+    useBehavior(minBounds$);
 
     return (
       <div ref={ref} className={styles.layer}>
@@ -52,7 +52,7 @@ export const makeSpotlightLandscapeLayout: CallLayout<
   }): ReactNode {
     useUpdateLayout();
     useVisibleTiles(model.setVisibleTiles);
-    useObservableEagerState(minBounds$);
+    useBehavior(minBounds$);
 
     return (
       <div ref={ref} className={styles.members}>

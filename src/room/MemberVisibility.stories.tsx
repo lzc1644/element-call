@@ -13,6 +13,7 @@ import { BehaviorSubject } from "rxjs";
 import { Button } from "@vector-im/compound-web";
 
 import styles from "./InCallView.module.css";
+import footerStyles from "../components/CallFooter.module.css";
 import { CallFooter, type FooterSnapshot } from "../components/CallFooter";
 import { Grid, type TileProps } from "../grid/Grid";
 import { makeSpotlightExpandedLayout } from "../grid/SpotlightExpandedLayout";
@@ -80,6 +81,9 @@ function MemberVisibilityStory({
     debugTileLayout: false,
     tileStoreGeneration: undefined,
     audioOptions: [],
+    audioOutputOptions: [],
+    selectedAudioOutput: undefined,
+    selectAudioOutputOption: undefined,
     videoOptions: [],
     selectedAudio: undefined,
     selectedVideo: undefined,
@@ -231,7 +235,11 @@ export const MembersVisible: Story = {
       ).toBeGreaterThanOrEqual(2);
     });
     const footer = canvas.getByTestId("footer-container");
-    await expect(getComputedStyle(footer).backgroundImage).toContain(
+    const toolbar = footer.querySelector<HTMLElement>(
+      `.${footerStyles.toolbar}`,
+    )!;
+    await expect(getComputedStyle(footer).backgroundImage).toBe("none");
+    await expect(getComputedStyle(toolbar).backgroundImage).toContain(
       "linear-gradient",
     );
     const stream = (main as HTMLVideoElement).srcObject;
@@ -253,7 +261,8 @@ export const MembersVisible: Story = {
         canvas.getByRole("button", { name: "Show members" }),
       );
       await expect(camera).toBeVisible();
-      await expect(getComputedStyle(footer).backgroundImage).toContain(
+      await expect(getComputedStyle(footer).backgroundImage).toBe("none");
+      await expect(getComputedStyle(toolbar).backgroundImage).toContain(
         "linear-gradient",
       );
     }

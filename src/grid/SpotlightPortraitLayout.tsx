@@ -6,7 +6,7 @@ Please see LICENSE in the repository root for full details.
 */
 
 import { type ReactNode, type CSSProperties } from "react";
-import { useObservableEagerState } from "observable-hooks";
+import { useBehavior } from "../useBehavior";
 
 import { type CallLayout, arrangeTiles } from "./CallLayout";
 import { type SpotlightPortraitLayout as SpotlightPortraitLayoutModel } from "../state/layout-types.ts";
@@ -35,7 +35,7 @@ export const makeSpotlightPortraitLayout: CallLayout<
     Slot,
   }): ReactNode {
     useUpdateLayout();
-    useObservableEagerState(minBounds$);
+    useBehavior(minBounds$);
 
     return (
       <div ref={ref} className={styles.layer}>
@@ -57,7 +57,7 @@ export const makeSpotlightPortraitLayout: CallLayout<
   }): ReactNode {
     useUpdateLayout();
     useVisibleTiles(model.setVisibleTiles);
-    const { width, height } = useObservableEagerState(minBounds$);
+    const { width, height } = useBehavior(minBounds$);
     const spotlightHeight = Math.min(width * (9 / 16), height * 0.45);
     const { gap, tileWidth, tileHeight } = arrangeTiles(
       width,

@@ -130,17 +130,25 @@ Mobile overlays leave the root gradient and participant tiles unobscured. */
   pointer-events: auto;
 }
 
-/* Match the footer's focus-visible reveal as well as its requested visibility. */
+/* Keep scroll clearance when controls are revealed by focus or an open menu. */
 :global([data-element-call-root][data-platform="android"]) .media,
 :global([data-element-call-root][data-platform="ios"]) .media {
   --call-footer-clearance: 0px;
 }
 
 :global([data-element-call-root][data-platform="android"])
-  .inRoom:has(> .footer[data-controls-visible="true"], > .footer :focus-visible)
+  .inRoom:has(
+    > .footer[data-controls-visible="true"],
+    > .footer :focus-visible,
+    > .footer [aria-expanded="true"]
+  )
   > .media,
 :global([data-element-call-root][data-platform="ios"])
-  .inRoom:has(> .footer[data-controls-visible="true"], > .footer :focus-visible)
+  .inRoom:has(
+    > .footer[data-controls-visible="true"],
+    > .footer :focus-visible,
+    > .footer [aria-expanded="true"]
+  )
   > .media {
   --call-footer-clearance: var(--call-footer-height);
 }
