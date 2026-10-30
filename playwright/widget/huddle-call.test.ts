@@ -44,6 +44,7 @@ widgetTest("Create and join a group call", async ({ addUser, browserName }) => {
 
   // Start the call as Valere
   await TestHelpers.startCallInCurrentRoom(valere.page, false);
+  await TestHelpers.approveWidgetPermissions(valere.page);
   await expect(
     valere.page.locator('iframe[title="Element Call"]'),
   ).toBeVisible();
@@ -53,6 +54,7 @@ widgetTest("Create and join a group call", async ({ addUser, browserName }) => {
   await Promise.all(
     [timo, robin, halfshot, florian].map(async (user) => {
       await TestHelpers.joinCallInCurrentRoom(user.page);
+      await TestHelpers.approveWidgetPermissions(user.page);
     }),
   );
 
@@ -87,10 +89,9 @@ widgetTest("Create and join a group call", async ({ addUser, browserName }) => {
       );
 
       // No one should be waiting for media
-      await expect(frame.getByText("Waiting for media...")).not.toBeVisible({
-        // Use a bigger timeout here
-        timeout: 10000,
-      });
+      await expect(
+        frame.getByText("Waiting for media...").filter({ visible: true }),
+      ).toHaveCount(0, { timeout: 10000 });
 
       // There should be 5 video elements, visible and autoplaying
       await expect(frame.locator("video")).toHaveCount(5);
@@ -109,6 +110,9 @@ widgetTest("Create and join a group call", async ({ addUser, browserName }) => {
   });
   await expect(florianVideoButton).toHaveAccessibleName("Stop video");
   await expect(florianVideoButton).toBeChecked();
+  await florianFrame
+    .locator("[data-layout]")
+    .dispatchEvent("pointermove", { pointerType: "mouse" });
   await florianVideoButton.click();
   // Now the button should indicate we can start video
   await expect(florianVideoButton).toHaveAccessibleName("Start video");

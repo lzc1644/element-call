@@ -8,6 +8,7 @@ Please see LICENSE in the repository root for full details.
 import { expect, test } from "@playwright/test";
 
 import { mobileTest } from "../fixtures/fixture-mobile-create.ts";
+import { SpaHelpers } from "../spa-helpers.ts";
 
 test("@mobile Start a new call then leave and show the feedback screen", async ({
   page,
@@ -37,7 +38,7 @@ test("@mobile Start a new call then leave and show the feedback screen", async (
   await expect(page.getByTestId("name_tag")).toContainText("John Doe");
 
   // leave the call
-  await page.getByTestId("incall_leave").click();
+  await SpaHelpers.leaveCall(page);
   await expect(page.getByRole("heading")).toContainText(
     "John Doe, your call has ended. How did it go?",
   );
@@ -132,7 +133,6 @@ mobileTest(
     // dismiss settings
     await guestPage.locator("#root").press("Escape");
 
-    await guestPage.pause();
     await expect(
       guestPage.getByRole("heading", { name: "Handset Mode" }),
     ).toBeVisible();

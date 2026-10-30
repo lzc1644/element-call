@@ -14,6 +14,7 @@ import {
   Track,
 } from "livekit-client";
 import { logger } from "matrix-js-sdk/lib/logger";
+import { convertToLivekitProcessor } from "@element-hq/matrixrtc-sdk";
 
 import { useMediaDevices } from "../MediaDevicesContext";
 import { type MuteStates } from "../state/MuteStates";
@@ -21,7 +22,7 @@ import { useInitial } from "../useInitial";
 import {
   useTrackProcessor,
   useTrackProcessorSync,
-} from "../livekit/TrackProcessorContext";
+} from "../tracks/TrackProcessorContext";
 import { getValue } from "../utils/observable";
 import { useBehavior } from "../useBehavior";
 
@@ -68,7 +69,8 @@ export function usePrejoinMedia(
       video: shouldPrepare &&
         videoEnabled && {
           deviceId: videoInputId,
-          processor: initialProcessor,
+          processor:
+            initialProcessor && convertToLivekitProcessor(initialProcessor),
         },
     }),
     [

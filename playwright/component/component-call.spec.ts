@@ -279,7 +279,7 @@ test("looks the same in a small container as in a small window", async ({
   // And that footer is the compact one: a single row of controls, not the
   // full-height bar with its logo and layout switch that a large window gets
   expect(component.footerHeight).toBeLessThan(size.height / 3);
-  expect(component.tileHeight + component.footerHeight).toBeLessThanOrEqual(
-    size.height,
-  );
+  // The retained floating footer overlays the media instead of shortening it.
+  await expectWithin(pane.getByTestId("videoTile").first(), container);
+  await expectWithin(pane.getByTestId("footer-container"), container);
 });

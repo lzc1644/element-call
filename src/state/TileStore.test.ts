@@ -11,7 +11,6 @@ import { TileStore } from "./TileStore";
 import {
   mockRemoteScreenShare,
   mockRemoteMedia,
-  mockRemoteParticipant,
   mockRtcMembership,
   testScope,
 } from "../utils/test";
@@ -21,7 +20,7 @@ it("reuses spotlight subscriptions, but releases each removed spotlight", () => 
   const alice = mockRemoteScreenShare(
     mockRtcMembership("@alice:example.org", "A"),
     {},
-    mockRemoteParticipant({}),
+    [],
   );
   let tiles = TileStore.empty(scope);
   for (let i = 0; i < 10; i++) {
@@ -44,9 +43,8 @@ it("reuses spotlight subscriptions, but releases each removed spotlight", () => 
 it("keeps cameras in the grid and reuses the share-only spotlight", () => {
   const scope = testScope();
   const membership = mockRtcMembership("@alice:example.org", "A");
-  const participant = mockRemoteParticipant({});
-  const camera = mockRemoteMedia(membership, {}, participant);
-  const share = mockRemoteScreenShare(membership, {}, participant);
+  const camera = mockRemoteMedia(membership, {}, []);
+  const share = mockRemoteScreenShare(membership, {}, []);
   const add = TileStore.empty(scope).from(Infinity);
   add.registerSpotlight([share], false);
   add.registerGridTile(camera);

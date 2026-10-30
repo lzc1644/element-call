@@ -40,6 +40,14 @@ export class TestHelpers {
     });
   }
 
+  public static async approveWidgetPermissions(page: Page): Promise<void> {
+    const dialog = page.getByRole("dialog", {
+      name: "Approve widget permissions",
+    });
+    await expect(dialog).toBeVisible({ timeout: 30_000 });
+    await dialog.getByRole("button", { name: "Approve", exact: true }).click();
+  }
+
   public static async joinCallFromLobby(page: Page): Promise<void> {
     await expect(
       page
@@ -159,7 +167,7 @@ export class TestHelpers {
   public static async dismissStartupToasts(page: Page): Promise<void> {
     const expectedToasts = [
       { title: "Failed to load service worker", button: "OK" },
-      { title: "Back up your chats", button: "Dismiss" },
+      { title: "Back up your chats", button: "Not now" },
       { title: "Turn on key storage", button: "Dismiss" },
       { title: "Element does not support this browser", button: "Dismiss" },
     ];
@@ -178,7 +186,11 @@ export class TestHelpers {
         );
 
         if (toastConfig) {
-          await toast.getByRole("button", { name: toastConfig.button }).click();
+          // Bounded so that a renamed button leaves the toast in place and the
+          // next step reports it, instead of hanging until the test timeout.
+          await toast
+            .getByRole("button", { name: toastConfig.button })
+            .click({ timeout: 5000 });
         } else {
           // Unknown toast. We don't want to act on unknown toasts
           break;
@@ -296,6 +308,7 @@ export class TestHelpers {
       timeout: 10000,
     });
 
+    await TestHelpers.approveWidgetPermissions(page);
     await TestHelpers.setEmbeddedElementCallRtcMode(page, mode);
     await page.getByRole("button", { name: "Close lobby" }).click();
   }

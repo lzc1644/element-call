@@ -38,6 +38,7 @@ import { useMergedRefs } from "../useMergedRefs";
 import { TileWrapper } from "./TileWrapper";
 import { usePrefersReducedMotion } from "../usePrefersReducedMotion";
 import { useInitial } from "../useInitial";
+import { type DragCallback } from "../state/layout-types";
 
 const MAX_ANIMATED_TILES = 50; // Capped for performance reasons
 
@@ -81,7 +82,10 @@ interface DragState {
   cursorY: number;
 }
 
-interface SlotProps<Model> extends Omit<ComponentProps<"div">, "onDrag"> {
+export interface SlotProps<Model> extends Omit<
+  ComponentProps<"div">,
+  "onDrag"
+> {
   id: string;
   model: Model;
   onDrag?: DragCallback;
@@ -178,27 +182,6 @@ export interface TileProps<Model, R extends HTMLElement> {
   targetHeight: number;
   model: Model;
 }
-
-interface Drag {
-  /**
-   * The X coordinate of the dragged tile in grid space.
-   */
-  x: number;
-  /**
-   * The Y coordinate of the dragged tile in grid space.
-   */
-  y: number;
-  /**
-   * The X coordinate of the dragged tile, as a scalar of the grid width.
-   */
-  xRatio: number;
-  /**
-   * The Y coordinate of the dragged tile, as a scalar of the grid height.
-   */
-  yRatio: number;
-}
-
-export type DragCallback = (drag: Drag) => void;
 
 interface LayoutMemoProps<
   LayoutModel,
@@ -385,6 +368,9 @@ export function Grid<
         id === dragState.current?.tileId
           ? null
           : {
+              // A layout update can supersede an entry before it starts.
+              opacity: 1,
+              scale: 1,
               x,
               y,
               width,
@@ -442,13 +428,13 @@ export function Grid<
       )
       .catch(logger.error);
 
-    if (endOfGesture)
-      callback({
-        x: tileX,
-        y: tileY,
-        xRatio: tileX / (gridBounds.width - tile.width),
-        yRatio: tileY / (gridBounds.height - tile.height),
-      });
+    callback({
+      x: tileX,
+      y: tileY,
+      xRatio: tileX / (gridBounds.width - tile.width),
+      yRatio: tileY / (gridBounds.height - tile.height),
+      endOfGesture,
+    });
   };
 
   // Callback for useDrag. We could call useDrag here, but the default

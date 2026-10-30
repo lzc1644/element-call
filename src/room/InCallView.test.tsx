@@ -20,24 +20,22 @@ import {
   render,
   type RenderResult,
 } from "@testing-library/react";
-import { type LocalParticipant } from "livekit-client";
-import { BehaviorSubject, of } from "rxjs";
+import { BehaviorSubject } from "rxjs";
 import { type CallMembership } from "matrix-js-sdk/lib/matrixrtc";
 import { BrowserRouter } from "react-router-dom";
+import { type MatrixClient, type Room } from "matrix-js-sdk";
 import { TooltipProvider } from "@vector-im/compound-web";
-import { RoomContext, useLocalParticipant } from "@livekit/components-react";
 import userEvent from "@testing-library/user-event";
 import useMeasure from "react-use-measure";
 
 import { ActiveCall, InCallView } from "./InCallView";
 import {
-  mockLivekitRoom,
-  mockLocalParticipant,
   mockMediaDevices,
   mockMuteStates,
-  mockRemoteParticipant,
   mockRtcMembership,
   type MockRTCSession,
+  mockRTCSlot,
+  mockRTCMember,
 } from "../utils/test";
 import { E2eeType } from "../e2ee/e2eeType";
 import {
@@ -57,15 +55,16 @@ import {
 } from "../utils/test-fixtures";
 import { ReactionsSenderProvider } from "../reactions/useReactionsSender";
 import { useRoomEncryptionSystem } from "../e2ee/sharedKeyManagement";
-import { LivekitRoomAudioRenderer } from "../livekit/MatrixAudioRenderer";
+import { MemberAudioRenderer } from "../tracks/MemberAudioRenderer";
+import type * as MatrixRTCSdk from "@element-hq/matrixrtc-sdk";
+import { constant, type ObservableScope } from "@element-hq/matrixrtc-sdk";
 import { MediaDevicesContext } from "../MediaDevicesContext";
 import { type MediaDevices as ECMediaDevices } from "../state/MediaDevices";
 import { AppBar } from "../AppBar";
 import { type MatrixInfo } from "./VideoPreview";
-import { ProcessorProvider } from "../livekit/TrackProcessorContext";
+import { ProcessorProvider } from "../tracks/TrackProcessorContext";
 import { initializeWidget } from "../widget";
 import { RootElementProvider } from "../RootElementContext";
-import { constant } from "../state/Behavior";
 import styles from "./InCallView.module.css";
 import { SpotlightTile } from "../tile/SpotlightTile";
 
@@ -84,21 +83,19 @@ vi.mock("../soundUtils");
 vi.mock("../useAudioContext");
 vi.mock("../tile/GridTile");
 vi.mock("../tile/SpotlightTile");
-vi.mock("@livekit/components-react");
-vi.mock("livekit-client/e2ee-worker?worker");
 vi.mock("../e2ee/sharedKeyManagement");
-vi.mock("../livekit/MatrixAudioRenderer");
+vi.mock("../tracks/MemberAudioRenderer");
+// ActiveCall builds the slot itself; the view is what these tests are about
+const createRTCSlotMock = vi.hoisted(() => vi.fn());
+vi.mock("@element-hq/matrixrtc-sdk", async (importOriginal) => ({
+  ...(await importOriginal<typeof MatrixRTCSdk>()),
+  createRTCSlot: createRTCSlotMock,
+}));
 vi.mock("react-use-measure", () => ({
   default: vi.fn(() => [(): void => {}, {}]),
 }));
 
 const localRtcMember = mockRtcMembership("@carol:example.org", "CCCC");
-const localParticipant = mockLocalParticipant({
-  identity: "@local:example.org:AAAAAA",
-});
-const remoteParticipant = mockRemoteParticipant({
-  identity: "@alice:example.org:AAAAAA",
-});
 
 const matrixInfo = {
   userId: "",
@@ -134,21 +131,28 @@ beforeEach(() => {
     (): void => {},
   ]);
 
-  // MatrixAudioRenderer is tested separately.
-  (
-    LivekitRoomAudioRenderer as MockedFunction<typeof LivekitRoomAudioRenderer>
-  ).mockImplementation((_props) => {
-    return <div>mocked: MatrixAudioRenderer</div>;
-  });
-  (
-    useLocalParticipant as MockedFunction<typeof useLocalParticipant>
-  ).mockImplementation(
-    () =>
-      ({
-        isScreenShareEnabled: false,
-        localParticipant: localRtcMember as unknown as LocalParticipant,
-      }) as unknown as ReturnType<typeof useLocalParticipant>,
+  createRTCSlotMock.mockImplementation(
+    (scope: ObservableScope, _client: MatrixClient, room: Room) =>
+      mockRTCSlot(scope, {
+        roomId: room.roomId,
+        localMember$: constant(
+          mockRTCMember(true, {
+            membership: localRtcMember,
+            tracks$: constant([]),
+          }),
+        ),
+        remoteMembers$: constant([
+          mockRTCMember(false, {
+            membership: aliceRtcMember,
+            tracks$: constant([]),
+          }),
+        ]),
+      }),
   );
+  // MemberAudioRenderer is tested separately.
+  (
+    MemberAudioRenderer as MockedFunction<typeof MemberAudioRenderer>
+  ).mockImplementation(() => <div>mocked: MemberAudioRenderer</div>);
   useRoomEncryptionSystemMock =
     useRoomEncryptionSystem as typeof useRoomEncryptionSystemMock;
   useRoomEncryptionSystemMock.mockReturnValue({ kind: E2eeType.NONE });
@@ -168,14 +172,6 @@ function createInCallView(args: CreateInCallViewArgs = {}): RenderResult & {
 } {
   const mediaDevices = args.mediaDevices ?? mockMediaDevices({});
   const muteState = mockMuteStates();
-  const livekitRoom = mockLivekitRoom(
-    {
-      localParticipant,
-    },
-    {
-      remoteParticipants$: of([remoteParticipant]),
-    },
-  );
   const { vm, footerVm, developerSettingsVm, rtcSession } =
     getBasicCallViewModelEnvironment(
       [local, alice],
@@ -216,7 +212,7 @@ function createInCallView(args: CreateInCallViewArgs = {}): RenderResult & {
         >
           <TooltipProvider>
             <RootElementProvider value={args.root ?? null}>
-              <RoomContext value={livekitRoom}>{content}</RoomContext>
+              {content}
             </RootElementProvider>
           </TooltipProvider>
         </ReactionsSenderProvider>
@@ -338,8 +334,11 @@ describe("InCallView", () => {
         expect(call).toHaveAttribute("data-layout", "spotlight-expanded");
         expect(call).toHaveAttribute("data-members-hidden", "true");
         const hidden = vm.layout$.value;
-        if ("spotlight" in initial && "spotlight" in hidden)
-          expect(hidden.spotlight).toBe(initial.spotlight);
+        if (
+          initial.type === "spotlight-landscape" &&
+          hidden.type === "spotlight-expanded"
+        )
+          expect(hidden.spotlight).toBe(initial.spotlight.vm);
         expect(call.querySelector(`.${styles.fixedGrid}`)).toBe(fixed);
         expect(call.querySelector(`.${styles.scrollingGrid}`)).toBe(scrolling);
 
@@ -470,18 +469,16 @@ describe("ActiveCall", () => {
         <MediaDevicesContext value={mediaDevices}>
           <ProcessorProvider>
             <TooltipProvider>
-              <RoomContext value={mockLivekitRoom({ localParticipant })}>
-                <ActiveCall
-                  client={matrixRoom.client}
-                  rtcSession={rtcSession.asMockedSession()}
-                  matrixRoom={matrixRoom}
-                  muteStates={mockMuteStates()}
-                  matrixInfo={matrixInfo}
-                  onShareClick={null}
-                  e2eeSystem={{ kind: E2eeType.NONE }}
-                  onLeft={(): void => {}}
-                />
-              </RoomContext>
+              <ActiveCall
+                client={matrixRoom.client}
+                rtcSession={rtcSession.asMockedSession()}
+                matrixRoom={matrixRoom}
+                muteStates={mockMuteStates()}
+                matrixInfo={matrixInfo}
+                onShareClick={null}
+                e2eeSystem={{ kind: E2eeType.NONE }}
+                onLeft={(): void => {}}
+              />
             </TooltipProvider>
           </ProcessorProvider>
         </MediaDevicesContext>
@@ -525,18 +522,16 @@ describe("ActiveCall", () => {
             <MediaDevicesContext value={mediaDevices}>
               <ProcessorProvider>
                 <TooltipProvider>
-                  <RoomContext value={mockLivekitRoom({ localParticipant })}>
-                    <ActiveCall
-                      client={matrixRoom.client}
-                      rtcSession={rtcSession.asMockedSession()}
-                      matrixRoom={matrixRoom}
-                      muteStates={mockMuteStates()}
-                      matrixInfo={matrixInfo}
-                      onShareClick={null}
-                      e2eeSystem={{ kind: E2eeType.NONE }}
-                      onLeft={(): void => {}}
-                    />
-                  </RoomContext>
+                  <ActiveCall
+                    client={matrixRoom.client}
+                    rtcSession={rtcSession.asMockedSession()}
+                    matrixRoom={matrixRoom}
+                    muteStates={mockMuteStates()}
+                    matrixInfo={matrixInfo}
+                    onShareClick={null}
+                    e2eeSystem={{ kind: E2eeType.NONE }}
+                    onLeft={(): void => {}}
+                  />
                 </TooltipProvider>
               </ProcessorProvider>
             </MediaDevicesContext>

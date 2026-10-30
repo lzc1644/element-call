@@ -116,6 +116,9 @@ exports[`InCallView > rendering > renders 1`] = `
         </div>
       </button>
     </div>
+    <div>
+      mocked: MemberAudioRenderer
+    </div>
     <div
       class="_media_4e7ff8"
       style="--call-footer-height: 0px; --call-spotlight-height: NaNpx;"

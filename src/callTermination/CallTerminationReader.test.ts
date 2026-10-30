@@ -23,7 +23,13 @@ import {
   localRtcMember,
   localRtcMemberDevice2,
 } from "../utils/test-fixtures";
-import { mockRtcMembership, testScope } from "../utils/test";
+import {
+  mockRTCMember,
+  mockRTCSlot,
+  mockRtcMembership,
+  testScope,
+} from "../utils/test";
+import { BehaviorSubject } from "rxjs";
 import { CallTerminationReader } from "./CallTerminationReader";
 import { CallTerminationEventType, ElementCallTerminateEventType } from ".";
 
@@ -52,6 +58,131 @@ describe.each([CallTerminationEventType, ElementCallTerminateEventType])(
 );
 
 function runReaderTests(eventType: string): void {
+  test("uses the non-default SDK slot's members, never the client's default session", () => {
+    const { rtcSession } = getBasicRTCSession([local, alice]);
+    const scope = testScope();
+    const membership = mockRtcMembership("@bob:example.org", "BOB", {
+      membership: { created_ts: 1000 },
+    });
+    const members$ = new BehaviorSubject([
+      mockRTCMember(false, { membership }),
+    ]);
+    const slot = mockRTCSlot(scope, { roomId: rtcSession.room.roomId });
+    Object.assign(slot, {
+      application: "com.example.call",
+      id: "OTHER",
+      members$,
+    });
+    Object.defineProperty(rtcSession.room.client, "matrixRTC", {
+      get: () => {
+        throw new Error("Default session must not be consulted");
+      },
+    });
+    const reader = new CallTerminationReader(
+      scope,
+      { room: rtcSession.room, slot },
+      rtcSession.room.client,
+    );
+    const onTermination = vi.fn();
+    reader.termination$.subscribe(onTermination);
+
+    emitTimeline(
+      rtcSession,
+      makeTerminationEvent({
+        roomId: rtcSession.room.roomId,
+        sender: alice.userId,
+      }),
+    );
+    expect(onTermination).not.toHaveBeenCalled();
+    emitTimeline(
+      rtcSession,
+      makeTerminationEvent({
+        roomId: rtcSession.room.roomId,
+        sender: membership.userId,
+      }),
+    );
+    expect(onTermination).toHaveBeenCalledExactlyOnceWith({
+      terminatedBy: membership.userId,
+      timestamp: 12345,
+      reason: undefined,
+    });
+
+    scope.end();
+    emitTimeline(
+      rtcSession,
+      makeTerminationEvent({
+        roomId: rtcSession.room.roomId,
+        sender: membership.userId,
+        eventId: "$after-end",
+      }),
+    );
+    expect(onTermination).toHaveBeenCalledOnce();
+  });
+
+  test("SDK membership renewals retain the local join boundary on a reused member", () => {
+    const { rtcSession } = getBasicRTCSession([local, alice]);
+    const scope = testScope();
+    const localMember = mockRTCMember(true, { membership: localRtcMember });
+    const localEvent$ = new BehaviorSubject({
+      eventId: "$first-join",
+      createdTs: 1000,
+    });
+    localMember.membershipEvent$ = localEvent$;
+    const aliceMember = mockRTCMember(false, {
+      membership: mockRtcMembership(alice.userId, aliceDeviceId, {
+        membership: { created_ts: 1000 },
+      }),
+    });
+    const slot = mockRTCSlot(scope, {
+      roomId: rtcSession.room.roomId,
+      localMember$: new BehaviorSubject(localMember),
+      remoteMembers$: new BehaviorSubject([aliceMember]),
+    });
+    Object.assign(slot, { application: "com.example.call", id: "OTHER" });
+    const reader = new CallTerminationReader(
+      scope,
+      { room: rtcSession.room, slot },
+      rtcSession.room.client,
+    );
+    const onTermination = vi.fn();
+    reader.termination$.subscribe(onTermination);
+    localEvent$.next({ eventId: "$second-join", createdTs: 5000 });
+
+    emitTimeline(
+      rtcSession,
+      makeTerminationEvent({
+        roomId: rtcSession.room.roomId,
+        sender: alice.userId,
+        originServerTs: 2000,
+      }),
+    );
+    expect(onTermination).not.toHaveBeenCalled();
+    emitTimeline(
+      rtcSession,
+      makeTerminationEvent({
+        roomId: rtcSession.room.roomId,
+        sender: alice.userId,
+        eventId: "$current",
+        originServerTs: 6000,
+      }),
+    );
+    expect(onTermination).toHaveBeenCalledOnce();
+  });
+
+  test("rejects an SDK slot from another room", () => {
+    const { rtcSession } = getBasicRTCSession([local, alice]);
+    const scope = testScope();
+    const slot = mockRTCSlot(scope, { roomId: "!other:example.org" });
+    expect(
+      () =>
+        new CallTerminationReader(
+          scope,
+          { room: rtcSession.room, slot },
+          rtcSession.room.client,
+        ),
+    ).toThrow("must belong to the call's room");
+  });
+
   test("emits a live termination event sent by another participant", () => {
     const { rtcSession } = getBasicRTCSession([local, alice]);
     const reader = new CallTerminationReader(

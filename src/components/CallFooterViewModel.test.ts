@@ -14,7 +14,7 @@ import {
   type CallViewModel,
   type CallTerminationState,
 } from "../state/CallViewModel/CallViewModel";
-import type { Alignment, Layout } from "../state/layout-types";
+import type { Layout } from "../state/layout-types";
 import { type SpotlightTileViewModel } from "../state/TileViewModel";
 import type { DeviceLabel } from "../state/MediaDevices";
 import { createCallFooterViewModel } from "./CallFooterViewModel";
@@ -72,10 +72,6 @@ function buildMinimalCallViewModel(layout: Layout): CallViewModel {
 const gridLayout: Layout = {
   type: "grid",
   grid: [],
-  spotlightAlignment$: new BehaviorSubject<Alignment>({
-    inline: "end",
-    block: "end",
-  }),
   setVisibleTiles: (_: number) => {},
 };
 

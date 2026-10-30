@@ -21,12 +21,10 @@ import { BehaviorSubject } from "rxjs";
 
 import { SpotlightTile } from "./SpotlightTile";
 import {
-  mockLocalParticipant,
   mockMediaDevices,
   mockRtcMembership,
   mockLocalMedia,
   mockRemoteMedia,
-  mockRemoteParticipant,
   mockRemoteScreenShare,
   testScope,
 } from "../utils/test";
@@ -52,7 +50,7 @@ test("SpotlightTile is accessible", async () => {
       rawDisplayName: "Alice",
       getMxcAvatarUrl: () => "mxc://adfsg",
     },
-    mockRemoteParticipant({}),
+    [],
   );
 
   const vm2 = mockLocalMedia(
@@ -61,7 +59,7 @@ test("SpotlightTile is accessible", async () => {
       rawDisplayName: "Bob",
       getMxcAvatarUrl: () => "mxc://dlskf",
     },
-    mockLocalParticipant({}),
+    [],
     mockMediaDevices({}),
   );
 
@@ -110,12 +108,12 @@ test("SpotlightTile falls back to the remaining share when the visible share sto
   const remainingShare = mockRemoteScreenShare(
     mockRtcMembership("@bob:example.org", "BBBB"),
     {},
-    mockRemoteParticipant({}),
+    [],
   );
   const share = mockRemoteScreenShare(
     mockRtcMembership("@alice:example.org", "AAAA"),
     {},
-    mockRemoteParticipant({}),
+    [],
   );
   const media$ = new BehaviorSubject([share, remainingShare]);
 
@@ -154,7 +152,7 @@ test("Screen share volume UI is shown when screen share has audio", async () => 
   const vm = mockRemoteScreenShare(
     mockRtcMembership("@alice:example.org", "AAAA"),
     {},
-    mockRemoteParticipant({}),
+    [],
   );
 
   vi.spyOn(vm, "audioEnabled$", "get").mockReturnValue(constant(true));
@@ -193,7 +191,7 @@ test("Screen share volume UI is hidden when screen share has no audio", async ()
   const vm = mockRemoteScreenShare(
     mockRtcMembership("@alice:example.org", "AAAA"),
     {},
-    mockRemoteParticipant({}),
+    [],
   );
 
   vi.spyOn(vm, "audioEnabled$", "get").mockReturnValue(constant(false));
@@ -232,12 +230,12 @@ test("switching shares closes the old root-local popup and controls only the new
   const alice = mockRemoteScreenShare(
     mockRtcMembership("@alice:example.org", "A"),
     {},
-    mockRemoteParticipant({}),
+    [],
   );
   const bob = mockRemoteScreenShare(
     mockRtcMembership("@bob:example.org", "B"),
     {},
-    mockRemoteParticipant({}),
+    [],
   );
   const bobAudio$ = new BehaviorSubject(true);
   vi.spyOn(alice, "audioEnabled$", "get").mockReturnValue(constant(true));
@@ -282,7 +280,7 @@ test("the video-local popup stays usable past the footer timeout without a foote
   const audio = mockRemoteScreenShare(
     mockRtcMembership("@alice:example.org", "A"),
     {},
-    mockRemoteParticipant({}),
+    [],
   );
   vi.spyOn(audio, "audioEnabled$", "get").mockReturnValue(constant(true));
   renderSharingSpotlight(new BehaviorSubject([audio]));
@@ -328,12 +326,12 @@ test("swiping selects the majority-visible share on the current spotlight model"
   const alice = mockRemoteScreenShare(
     mockRtcMembership("@alice:example.org", "A"),
     { rawDisplayName: "Alice" },
-    mockRemoteParticipant({}),
+    [],
   );
   const bob = mockRemoteScreenShare(
     mockRtcMembership("@bob:example.org", "B"),
     { rawDisplayName: "Bob" },
-    mockRemoteParticipant({}),
+    [],
   );
   const previous = new SpotlightTileViewModel(
     testScope(),

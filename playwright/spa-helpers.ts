@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
 */
 
-import { expect, type Page } from "@playwright/test";
+import { expect, type FrameLocator, type Page } from "@playwright/test";
 
 import { type RtcMode } from "./widget/test-helpers.ts";
 
@@ -111,6 +111,17 @@ async function setRtcModeFromSettings(
   await page.getByTestId("modal_close").click();
 }
 
+/** Leaves locally through the same menu in standalone and widget calls. */
+async function leaveCall(scope: Page | FrameLocator): Promise<void> {
+  await scope
+    .locator("[data-layout]")
+    .dispatchEvent("pointermove", { pointerType: "mouse" });
+  await scope.getByRole("button", { name: "End call", exact: true }).click();
+  await scope
+    .getByRole("menuitem", { name: "Leave call", exact: true })
+    .click();
+}
+
 /**
  * Makes the delayed-leave delegation support probes fail so that the client
  * manages its delayed leave event itself instead of delegating it to the
@@ -133,12 +144,12 @@ async function disableLeaveDelegation(page: Page): Promise<void> {
  * Expect a certain number of video tiles to be present and visible.
  */
 async function expectVideoTilesCount(page: Page, count: number): Promise<void> {
-  await expect(page.getByTestId("videoTile")).toHaveCount(2);
+  await expect(page.getByTestId("videoTile")).toHaveCount(count);
 
   // No one should be waiting for media
-  await expect(page.getByText("Waiting for media...")).not.toBeVisible({
-    timeout: 10000,
-  });
+  await expect(
+    page.getByText("Waiting for media...").filter({ visible: true }),
+  ).toHaveCount(0, { timeout: 10000 });
 
   // There should be `count` video elements, visible and autoplaying
   await expect(page.locator("video").filter({ visible: true })).toHaveCount(
@@ -151,6 +162,7 @@ export const SpaHelpers = {
   createCall,
   getCallInviteLink,
   joinCallFromInviteLink,
+  leaveCall,
   disableLeaveDelegation,
   expectVideoTilesCount,
 };

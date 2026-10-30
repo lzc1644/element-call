@@ -104,9 +104,9 @@ widgetTest("Sharing screen in group call", async ({ addUser, browserName }) => {
       timeout: 5000,
     });
 
-    await expect(
-      frame.locator('video[data-lk-source="screen_share"]'),
-    ).toHaveCount(1);
+    await expect(frame.locator('video[data-source="screenShare"]')).toHaveCount(
+      1,
+    );
   }
 
   // Alice should be in grid mode as she is local sharing
@@ -124,15 +124,15 @@ widgetTest("Sharing screen in group call", async ({ addUser, browserName }) => {
   const spotlightItems = carolFrame.locator("[data-id][aria-hidden]");
   await expect(spotlightItems).toHaveCount(1);
   const spotlightShare = spotlightItems.filter({
-    has: carolFrame.locator('video[data-lk-source="screen_share"]'),
+    has: carolFrame.locator('video[data-source="screenShare"]'),
   });
   await expect(spotlightShare).toHaveAttribute("aria-hidden", "false");
   await expect(
-    spotlightItems.locator('video[data-lk-source="camera"]'),
+    spotlightItems.locator('video[data-source="camera"]'),
   ).toHaveCount(0);
-  await expect(
-    carolFrame.locator('video[data-lk-source="camera"]'),
-  ).toHaveCount(3);
+  await expect(carolFrame.locator('video[data-source="camera"]')).toHaveCount(
+    3,
+  );
   await expect(
     carolFrame.getByRole("button", { name: "Next" }),
   ).not.toBeVisible();
@@ -152,9 +152,9 @@ widgetTest("Sharing screen in group call", async ({ addUser, browserName }) => {
       pipShare.evaluate((video: HTMLVideoElement) => video.readyState),
     )
     .toBeGreaterThanOrEqual(2);
-  await expect(
-    carolFrame.locator('video[data-lk-source="camera"]'),
-  ).toHaveCount(0);
+  await expect(carolFrame.locator('video[data-source="camera"]')).toHaveCount(
+    0,
+  );
   await TestHelpers.switchToRoomNamed(carol.page, roomName);
   await expect(carolFrame.locator("[data-layout]")).not.toHaveAttribute(
     "data-layout",
@@ -165,14 +165,14 @@ widgetTest("Sharing screen in group call", async ({ addUser, browserName }) => {
   // no-share participant layout.
   await toggleScreenSharing(alice.page);
   await expect(
-    carolFrame.locator('video[data-lk-source="screen_share"]'),
+    carolFrame.locator('video[data-source="screenShare"]'),
   ).toHaveCount(0);
   // The no-share path may return to grid or spotlight-speaker layout, so
   // assert its stable semantics rather than requiring Alice's camera to stay
   // in the spotlight tile.
-  await expect(
-    carolFrame.locator('video[data-lk-source="camera"]'),
-  ).toHaveCount(3);
+  await expect(carolFrame.locator('video[data-source="camera"]')).toHaveCount(
+    3,
+  );
   await expect(
     carolFrame.getByRole("button", { name: "Next" }),
   ).not.toBeVisible();
@@ -195,7 +195,7 @@ widgetTest("Sharing screen in group call", async ({ addUser, browserName }) => {
       .locator('iframe[title="Element Call"]')
       .contentFrame();
     const call = frame.locator("[data-layout]");
-    const share = frame.locator('video[data-lk-source="screen_share"]');
+    const share = frame.locator('video[data-source="screenShare"]');
 
     for (let cycle = 0; cycle < 2; cycle++) {
       await frame.getByRole("button", { name: "Expand", exact: true }).click();
@@ -235,15 +235,15 @@ widgetTest("Sharing screen in group call", async ({ addUser, browserName }) => {
       timeout: 5000,
     });
 
-    await expect(
-      frame.locator('video[data-lk-source="screen_share"]'),
-    ).toHaveCount(2);
+    await expect(frame.locator('video[data-source="screenShare"]')).toHaveCount(
+      2,
+    );
 
     // Each indicator represents a shared screen, never a camera.
     await expect(frame.getByTestId("screenshare-indicator")).toHaveCount(2);
     await expect(spotlightItems).toHaveCount(2);
     await expect(
-      spotlightItems.locator('video[data-lk-source="camera"]'),
+      spotlightItems.locator('video[data-source="camera"]'),
     ).toHaveCount(0);
 
     // Check the first indicator is visible
@@ -268,12 +268,12 @@ widgetTest("Sharing screen in group call", async ({ addUser, browserName }) => {
     await expect(frame.getByRole("button", { name: "Back" })).toBeVisible();
     await expect(frame.getByRole("button", { name: "Next" })).not.toBeVisible();
     const visibleShare = frame.locator(
-      '[data-id][aria-hidden="false"] video[data-lk-source="screen_share"]',
+      '[data-id][aria-hidden="false"] video[data-source="screenShare"]',
     );
     await expect(visibleShare).toHaveCount(1);
     await expect(visibleShare).toBeInViewport();
     await expect(
-      frame.locator('video[data-lk-source="camera"]').filter({ visible: true }),
+      frame.locator('video[data-source="camera"]').filter({ visible: true }),
     ).toHaveCount(3);
 
     // Stop Bob's selected share; the carousel should return to Alice's share.
@@ -282,7 +282,7 @@ widgetTest("Sharing screen in group call", async ({ addUser, browserName }) => {
     await expect(spotlightItems).toHaveAttribute("aria-hidden", "false");
     await expect(frame.getByRole("button", { name: "Next" })).not.toBeVisible();
     await expect(
-      frame.locator('video[data-lk-source="camera"]').filter({ visible: true }),
+      frame.locator('video[data-source="camera"]').filter({ visible: true }),
     ).toHaveCount(3);
   }
 });

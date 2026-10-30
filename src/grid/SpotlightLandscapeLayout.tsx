@@ -37,7 +37,7 @@ export const makeSpotlightLandscapeLayout: CallLayout<
           <Slot
             className={styles.slot}
             id="spotlight"
-            model={model.spotlight}
+            model={model.spotlight.vm}
           />
         </div>
         <div />

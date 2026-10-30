@@ -36,7 +36,7 @@ import {
 } from "rxjs";
 import { useTranslation } from "react-i18next";
 import classNames from "classnames";
-import { type TrackReferenceOrPlaceholder } from "@livekit/components-core";
+import { type VideoMediaTrack } from "@element-hq/matrixrtc-sdk";
 import { MenuItem, MenuTitle, Text } from "@vector-im/compound-web";
 import { Root, Trigger, Portal, Content, Title } from "@radix-ui/react-dialog";
 import useMeasure from "react-use-measure";
@@ -65,7 +65,7 @@ import { RingingStatus } from "./RingingStatus";
 import { useRootElement } from "../RootElementContext";
 import { useRootSizeMatches } from "../useRootSize";
 import { observeElementSize$ } from "../utils/elementSize";
-import { type UnstableLivekitTransport } from "matrix-js-sdk/lib/matrixrtc";
+import { type Transport } from "matrix-js-sdk/lib/matrixrtc";
 
 interface SpotlightItemBaseProps {
   ref?: Ref<HTMLDivElement>;
@@ -84,9 +84,9 @@ interface SpotlightItemBaseProps {
 }
 
 interface SpotlightMemberMediaItemBaseProps extends SpotlightItemBaseProps {
-  video: TrackReferenceOrPlaceholder | undefined;
+  video: VideoMediaTrack | undefined;
   unencryptedWarning: boolean;
-  transport: UnstableLivekitTransport | undefined;
+  transport: Transport | undefined;
 }
 
 interface SpotlightUserMediaItemBaseProps extends SpotlightMemberMediaItemBaseProps {

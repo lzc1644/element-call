@@ -33,7 +33,7 @@ vi.mock("@livekit/components-react", () => ({
   },
 }));
 
-vi.mock("../livekit/TrackProcessorContext", () => ({
+vi.mock("../tracks/TrackProcessorContext", () => ({
   useTrackProcessor: () => ({
     supported: false,
     processor: undefined,
