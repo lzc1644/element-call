@@ -11,16 +11,33 @@ import {
   LocalParticipant,
   type LocalTrack,
   type LocalTrackPublication,
+  LocalVideoTrack,
   ParticipantEvent,
   type Room as LivekitRoom,
   Track,
+  type TrackPublishOptions,
 } from "livekit-client";
 import { logger } from "matrix-js-sdk/lib/logger";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
-import { type PublishRequest } from "../../media-api";
+import {
+  type HandedOverTrack,
+  type LocalMedia,
+  type PublishRequest,
+  type VideoProcessor,
+} from "../../media-api";
+import { createLocalMedia } from "../../LocalMedia";
 import { flushPromises } from "../../utils/test";
 import { type DesiredMedia, Publisher } from "./Publisher";
+import { type LivekitProcessor, toLivekitProcessor } from "./videoProcessor";
 
 describe("Publisher", () => {
   describe("setAudioOutputDevice", () => {
@@ -102,6 +119,24 @@ describe("Publisher", () => {
       await flushPromises();
 
       expect(participant.createTracks).not.toHaveBeenCalled();
+    });
+
+    it("creates both with the options of requests made since the join", async () => {
+      const processor: VideoProcessor = {
+        name: "effect",
+        init: vi.fn(),
+        restart: vi.fn(),
+        destroy: vi.fn(),
+      };
+      want(microphone, { source: "camera", deviceId: "front", processor });
+
+      publisher.start();
+      await flushPromises();
+
+      expect(room.options.videoCaptureDefaults).toMatchObject({
+        deviceId: "front",
+        processor: expect.objectContaining({ source: processor }),
+      });
     });
 
     it("asks for the camera and the microphone in one call", async () => {
@@ -526,6 +561,234 @@ function fakeRoom(
     switchActiveDevice,
   } as unknown as LivekitRoom;
   return { room, switchActiveDevice };
+}
+
+// A lobby's tracks come as the device's own MediaStreamTracks; LiveKit's
+// track classes are real here so that what is published is what LiveKit will
+// restart and stop as its own
+describe("adopting a lobby's tracks", () => {
+  // LiveKit wraps every track in a MediaStream, which jsdom does not have
+  beforeAll(() => {
+    globalThis.MediaStream = class {
+      public constructor(private readonly tracks: MediaStreamTrack[]) {}
+      public getTracks(): MediaStreamTrack[] {
+        return this.tracks;
+      }
+    } as unknown as typeof MediaStream;
+  });
+
+  function setup(
+    source: "microphone" | "camera",
+    handed: HandedOverTrack,
+    processor?: VideoProcessor,
+  ): { participant: LocalParticipant; publisher: Publisher } {
+    const participant = fakeLocalParticipant(async () => Promise.resolve());
+    const room = {
+      options: {},
+      setE2EEEnabled: () => undefined,
+      localParticipant: participant,
+    } as unknown as LivekitRoom;
+    const desired: DesiredMedia = new Map([
+      [
+        source,
+        {
+          request: source === "camera" ? { source, processor } : { source },
+          enabled: true,
+        },
+      ],
+    ]);
+    const media = {
+      takeTracks: () => new Map([[source, handed]]),
+    } as unknown as LocalMedia;
+    const publisher = new Publisher(room, desired, logger, media);
+    return { participant, publisher };
+  }
+
+  it("publishes the lobby's track as its own rather than capturing", async () => {
+    const handed = handedOver("video");
+    const { participant, publisher } = setup("camera", handed);
+
+    publisher.start();
+    await flushPromises();
+
+    expect(participant.createTracks).not.toHaveBeenCalled();
+    const [published, options] = vi.mocked(participant.publishTrack).mock
+      .calls[0] as [LocalVideoTrack, TrackPublishOptions];
+    expect(published).toBeInstanceOf(LocalVideoTrack);
+    expect(published.mediaStreamTrack).toBe(handed.track);
+    expect(published.isUserProvided).toBe(false);
+    expect(options.source).toBe(Track.Source.Camera);
+  });
+
+  it("adopts the processor's output without initialising it again", async () => {
+    const setProcessor = vi
+      .spyOn(LocalVideoTrack.prototype, "setProcessor")
+      .mockResolvedValue(undefined);
+    const processor = {
+      name: "blur",
+      init: vi.fn(),
+      restart: vi.fn(),
+      destroy: vi.fn(),
+    } as unknown as VideoProcessor;
+    const processedTrack = fakeMediaStreamTrack("video");
+    const handed = handedOver("video", {
+      processor: { processor, processedTrack },
+    });
+    const { publisher } = setup("camera", handed);
+
+    publisher.start();
+    await flushPromises();
+
+    const adapter = setProcessor.mock.calls[0][0] as LivekitProcessor;
+    await adapter.init({ kind: Track.Kind.Video, track: handed.track });
+    expect(adapter.processedTrack).toBe(processedTrack);
+    expect(adapter.source).toBe(processor);
+    expect(processor.init).not.toHaveBeenCalled();
+    setProcessor.mockRestore();
+  });
+
+  it.each(["handover", "request"] as const)(
+    "installs the %s processor before publishing an unprocessed handed-over camera",
+    async (source) => {
+      const installation = Promise.withResolvers<void>();
+      const setProcessor = vi
+        .spyOn(LocalVideoTrack.prototype, "setProcessor")
+        .mockReturnValue(installation.promise);
+      const processor = {
+        name: "blur",
+        init: vi.fn(),
+        restart: vi.fn(),
+        destroy: vi.fn(),
+      } as VideoProcessor;
+      const { participant, publisher } = setup(
+        "camera",
+        handedOver(
+          "video",
+          source === "handover" ? { processorToInitialize: processor } : {},
+        ),
+        source === "request" ? processor : undefined,
+      );
+
+      publisher.start();
+      await flushPromises();
+
+      expect(setProcessor).toHaveBeenCalledOnce();
+      expect((setProcessor.mock.calls[0][0] as LivekitProcessor).source).toBe(
+        processor,
+      );
+      expect(participant.publishTrack).not.toHaveBeenCalled();
+
+      installation.resolve();
+      await flushPromises();
+      expect(participant.publishTrack).toHaveBeenCalledOnce();
+      setProcessor.mockRestore();
+    },
+  );
+
+  it("finishes cancelled lobby output before the receiving backend initialises its processor", async () => {
+    const initialisation = Promise.withResolvers<MediaStreamTrack>();
+    const raw = fakeMediaStreamTrack("video");
+    const lateOutput = fakeMediaStreamTrack("video");
+    const currentOutput = fakeMediaStreamTrack("video");
+    const order: string[] = [];
+    const processor: VideoProcessor = {
+      name: "blur",
+      init: vi
+        .fn()
+        .mockImplementationOnce(async () => {
+          order.push("old init");
+          return initialisation.promise;
+        })
+        .mockImplementationOnce(async () => {
+          expect(lateOutput.stop).toHaveBeenCalledOnce();
+          order.push("backend init");
+          return Promise.resolve(currentOutput);
+        }),
+      restart: vi.fn().mockResolvedValue(currentOutput),
+      destroy: vi.fn(async () => {
+        order.push("destroy");
+        return Promise.resolve();
+      }),
+    };
+    const media = createLocalMedia(async () =>
+      Promise.resolve(new MediaStream([raw])),
+    );
+    const capture = media.capture([{ source: "camera", processor }]);
+    await vi.waitFor(() => expect(processor.init).toHaveBeenCalledOnce());
+    const handed = media.takeTracks().get("camera")!;
+    const adapter = toLivekitProcessor(handed.processorToInitialize!);
+    const adopting = adapter.init({
+      kind: Track.Kind.Video,
+      track: handed.track,
+    });
+
+    initialisation.resolve(lateOutput);
+    await Promise.all([capture, adopting]);
+
+    expect(order).toEqual(["old init", "destroy", "backend init"]);
+    expect(adapter.processedTrack).toBe(currentOutput);
+    expect(currentOutput.stop).not.toHaveBeenCalled();
+    expect(handed.track.stop).not.toHaveBeenCalled();
+  });
+
+  // A development build mounts, unmounts and mounts the call again: the first
+  // publisher must not have taken the tracks the second one needs
+  it("leaves the lobby's tracks alone until it starts", async () => {
+    const participant = fakeLocalParticipant(async () => Promise.resolve());
+    const room = {
+      options: {},
+      setE2EEEnabled: () => undefined,
+      localParticipant: participant,
+    } as unknown as LivekitRoom;
+    const takeTracks = vi.fn(() => new Map());
+    const media = { takeTracks } as unknown as LocalMedia;
+
+    const publisher = new Publisher(room, new Map(), logger, media);
+    await publisher.destroy();
+
+    expect(takeTracks).not.toHaveBeenCalled();
+  });
+
+  it("joins muted where the lobby muted", async () => {
+    const { participant, publisher } = setup(
+      "microphone",
+      handedOver("audio", { muted: true }),
+    );
+
+    publisher.start();
+    await flushPromises();
+
+    const [published] = vi.mocked(participant.publishTrack).mock.calls[0];
+    expect((published as LocalTrack).isMuted).toBe(true);
+  });
+});
+
+function fakeMediaStreamTrack(kind: "audio" | "video"): MediaStreamTrack {
+  return {
+    kind,
+    id: `${kind}-track`,
+    label: "",
+    enabled: true,
+    readyState: "live",
+    getSettings: () => ({}),
+    getConstraints: () => ({}),
+    getCapabilities: () => ({}),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    stop: vi.fn(),
+  } as unknown as MediaStreamTrack;
+}
+
+function handedOver(
+  kind: "audio" | "video",
+  extra: Partial<HandedOverTrack> = {},
+): HandedOverTrack {
+  return {
+    track: fakeMediaStreamTrack(kind),
+    constraints: { deviceId: "lobby" },
+    muted: false,
+    ...extra,
+  };
 }
 
 function fakeLocalTrack(source: Track.Source): LocalTrack {

@@ -41,7 +41,9 @@ import { Room as LivekitRoom } from "livekit-client";
 
 import { prefetchSounds } from "../soundUtils";
 import { useAudioContext } from "../useAudioContext";
-import { ActiveCall } from "./InCallView";
+import { ActiveCall, captureSettings } from "./InCallView";
+import { createLocalMedia } from "@element-hq/matrixrtc-sdk";
+import { useLocalMedia } from "../useLocalMedia";
 import {
   flushPromises,
   mockEmitter,
@@ -50,6 +52,7 @@ import {
   mockMediaDevices,
   mockRtcMembership,
   MockRTCSession,
+  testScope,
 } from "../utils/test";
 import { CallView } from "./CallView";
 import { GroupCallErrorBoundary } from "./GroupCallErrorBoundary";
@@ -61,7 +64,10 @@ import {
 } from "../HostBridge";
 import { type JoinCallData } from "../widget";
 import { MatrixRTCTransportMissingError } from "../utils/errors";
-import { ProcessorProvider } from "../tracks/TrackProcessorContext";
+import {
+  BackgroundEffectsProvider,
+  createAppBackgroundEffects,
+} from "../tracks/BackgroundEffectsContext";
 import { MediaDevicesContext } from "../MediaDevicesContext";
 import { constant } from "../state/Behavior";
 import { type MediaDevices } from "../state/MediaDevices";
@@ -69,19 +75,9 @@ import { type MediaDevices } from "../state/MediaDevices";
 vi.mock("../soundUtils");
 vi.mock("../useAudioContext");
 vi.mock("./InCallView");
-const previewTracks = vi.hoisted(() => ({
-  value: [] as unknown[] | undefined,
-  onError: undefined as ((error: Error) => void) | undefined,
-}));
-vi.mock("@livekit/components-react", () => ({
-  usePreviewTracks: (
-    _options: unknown,
-    onError?: (error: Error) => void,
-  ): unknown[] | undefined => {
-    previewTracks.onError = onError;
-    return previewTracks.value;
-  },
-}));
+vi.mock("../useLocalMedia");
+const getUserMedia =
+  vi.fn<(constraints: MediaStreamConstraints) => Promise<MediaStream>>();
 vi.mock("react-use-measure", () => ({
   default: (): [() => void, object] => [(): void => {}, {}],
 }));
@@ -128,8 +124,9 @@ const roomId = "!foo:bar";
 
 beforeEach(() => {
   vi.clearAllMocks();
-  previewTracks.value = [];
-  previewTracks.onError = undefined;
+  getUserMedia.mockReset();
+  vi.mocked(useLocalMedia).mockReturnValue(createLocalMedia(getUserMedia));
+  vi.mocked(captureSettings).mockReturnValue({});
   activeCallInstanceSeed = 0;
   (prefetchSounds as MockedFunction<typeof prefetchSounds>).mockResolvedValue({
     sound: new ArrayBuffer(0),
@@ -216,7 +213,9 @@ function createCallView(
           <MediaDevicesContext
             value={options.mediaDevices ?? mockMediaDevices({})}
           >
-            <ProcessorProvider>
+            <BackgroundEffectsProvider
+              effects={createAppBackgroundEffects(testScope())}
+            >
               {options.withErrorBoundary ? (
                 <GroupCallErrorBoundary recoveryActionHandler={vi.fn()}>
                   {callView()}
@@ -224,7 +223,7 @@ function createCallView(
               ) : (
                 callView()
               )}
-            </ProcessorProvider>
+            </BackgroundEffectsProvider>
           </MediaDevicesContext>
         </TooltipProvider>
       </HostBridgeProvider>
@@ -239,7 +238,8 @@ function createCallView(
 }
 
 test("waits for media permission before entering a call without a lobby", async () => {
-  previewTracks.value = undefined;
+  const permission = Promise.withResolvers<MediaStream>();
+  getUserMedia.mockReturnValue(permission.promise);
   const hostBridge: HostBridge = {
     ...nullHostBridge,
     allowJoinUnmutedViaIntent: true,
@@ -259,18 +259,30 @@ test("waits for media permission before entering a call without a lobby", async 
     },
   });
 
-  const { refresh } = createCallView(hostBridge, false, { mediaDevices });
-  await flushPromises();
+  createCallView(hostBridge, false, { mediaDevices });
+  await waitFor(() => expect(getUserMedia).toHaveBeenCalledOnce());
   expect(screen.queryByText("Leave")).toBeNull();
 
-  previewTracks.value = [];
-  refresh();
+  const track = {
+    kind: "audio",
+    id: "microphone-track",
+    getSettings: () => ({ deviceId: "microphone" }),
+    stop: vi.fn(),
+  } as unknown as MediaStreamTrack;
+  await act(async () => {
+    permission.resolve({ getTracks: () => [track] } as MediaStream);
+    await flushPromises();
+  });
 
   await waitFor(() => expect(screen.getByText("Leave")).toBeInTheDocument());
+  const joinedMedia = vi.mocked(ActiveCall).mock.calls.at(-1)![0].media;
+  expect(joinedMedia.tracks$.value[0].id).toBe(track.id);
+  expect(getUserMedia).toHaveBeenCalledOnce();
 });
 
 test("enters a direct call muted after media permission is rejected", async () => {
-  previewTracks.value = undefined;
+  const permission = Promise.withResolvers<MediaStream>();
+  getUserMedia.mockReturnValue(permission.promise);
   const hostBridge: HostBridge = {
     ...nullHostBridge,
     allowJoinUnmutedViaIntent: true,
@@ -294,17 +306,23 @@ test("enters a direct call muted after media permission is rejected", async () =
   await flushPromises();
   expect(screen.queryByText("Leave")).toBeNull();
 
-  act(() => previewTracks.onError?.(new Error("Permission denied")));
+  await act(async () => {
+    permission.reject(new Error("Permission denied"));
+    await flushPromises();
+  });
 
   await waitFor(() => expect(screen.getByText("Leave")).toBeInTheDocument());
+  const { muteStates } = vi.mocked(ActiveCall).mock.calls.at(-1)![0];
+  expect(muteStates.audio.enabled$.value).toBe(false);
+  expect(muteStates.video.enabled$.value).toBe(false);
+  expect(getUserMedia).toHaveBeenCalledOnce();
 });
 
 test("does not request media before entering a fully muted direct call", async () => {
-  previewTracks.value = undefined;
-
   createCallView(nullHostBridge, false);
 
   await waitFor(() => expect(screen.getByText("Leave")).toBeInTheDocument());
+  expect(getUserMedia).not.toHaveBeenCalled();
 });
 
 test.skip("CallView plays a leave sound asynchronously in SPA mode", async () => {
@@ -372,8 +390,8 @@ test("Should ask the host to close when all other left and play a sound", async 
     soundDuration: {},
   });
 
-  const { getByText } = createCallView(hostBridge);
-  const leaveButton = getByText("SimulateOtherLeft");
+  const { findByText } = createCallView(hostBridge);
+  const leaveButton = await findByText("SimulateOtherLeft");
   await user.click(leaveButton);
   await flushPromises();
   expect(close).not.toHaveBeenCalled();
@@ -414,8 +432,8 @@ test("Should not ask the host to close when auto leave due to error", async () =
     close,
   };
 
-  const { getByText } = createCallView(hostBridge);
-  const leaveButton = getByText("SimulateErrorLeft");
+  const { findByText } = createCallView(hostBridge);
+  const leaveButton = await findByText("SimulateErrorLeft");
   await user.click(leaveButton);
   await flushPromises();
 

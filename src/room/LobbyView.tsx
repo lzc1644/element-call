@@ -5,20 +5,18 @@ SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
 */
 
-import {
-  type FC,
-  useCallback,
-  useMemo,
-  useState,
-  type JSX,
-  useEffect,
-} from "react";
+import { type FC, useCallback, useState, type JSX, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { type MatrixClient } from "matrix-js-sdk";
 import { Button } from "@vector-im/compound-web";
 import classNames from "classnames";
 import { logger } from "matrix-js-sdk/lib/logger";
-import { type LocalVideoTrack, Track } from "livekit-client";
+import {
+  constant,
+  type LocalMedia,
+  type LocalVideoMediaTrack,
+} from "@element-hq/matrixrtc-sdk";
+import { map } from "rxjs";
 
 import inCallStyles from "./InCallView.module.css";
 import styles from "./LobbyView.module.css";
@@ -33,17 +31,26 @@ import { LeaveToHomeLink } from "../button/LeaveToHomeLink";
 import { useLeaveToHome } from "../LeaveToHomeContext";
 import { useMediaDevices } from "../MediaDevicesContext";
 import { ObservableScope } from "../state/ObservableScope";
+import { useBackgroundEffectsState$ } from "../tracks/BackgroundEffectsContext";
 import { useBehavior } from "../useBehavior";
 import { CallFooter, type FooterSnapshot } from "../components/CallFooter";
 import { useCallViewKeyboardShortcuts } from "../useCallViewKeyboardShortcuts";
 import { createLobbyFooterViewModel } from "../components/CallFooterViewModel";
 import { type ViewModel } from "../state/ViewModel";
 import { useAppBarPrimaryButtonIconKind } from "../AppBar";
-import { usePrejoinMedia } from "./usePrejoinMedia";
+import {
+  createLobbyMediaViewModel,
+  type LobbyMediaViewModel,
+} from "../state/LobbyMediaViewModel";
+import { captureSettings } from "./InCallView";
+
+const noVideoTrack = constant<LocalVideoMediaTrack | null>(null);
 
 interface Props {
   client: MatrixClient;
   matrixInfo: MatrixInfo;
+  /** The media to open the devices on; the join takes it over. */
+  media: LocalMedia;
   muteStates: MuteStates;
   onEnter: () => void;
   enterLabel?: JSX.Element | string;
@@ -57,6 +64,7 @@ interface Props {
 export const LobbyView: FC<Props> = ({
   client,
   matrixInfo,
+  media,
   muteStates,
   onEnter,
   enterLabel,
@@ -113,14 +121,38 @@ export const LobbyView: FC<Props> = ({
   );
 
   const devices = useMediaDevices();
-  const { tracks } = usePrejoinMedia(muteStates);
+  const videoInputId = useBehavior(devices.videoInput.selected$)?.id;
+  const backgroundEffectsState$ = useBackgroundEffectsState$();
 
-  const videoTrack = useMemo(
-    () =>
-      (tracks?.find((t) => t.kind === Track.Kind.Video) ??
-        null) as LocalVideoTrack | null,
-    [tracks],
-  );
+  const [mediaVm, setMediaVm] = useState<LobbyMediaViewModel | null>(null);
+  useEffect(() => {
+    const mediaScope = new ObservableScope();
+    setMediaVm(
+      createLobbyMediaViewModel(
+        mediaScope,
+        media,
+        muteStates,
+        devices,
+        captureSettings(),
+        mediaScope.behavior(
+          backgroundEffectsState$.pipe(map((state) => state.processor)),
+        ),
+      ),
+    );
+    return (): void => {
+      mediaScope.end();
+    };
+  }, [media, muteStates, devices, backgroundEffectsState$]);
+  const videoTrack = useBehavior(mediaVm?.videoTrack$ ?? noVideoTrack);
+
+  useEffect(() => {
+    if (videoTrack && videoInputId === undefined) {
+      // If we have a video track but no videoInputId,
+      // we have to update the available devices. So that we select the first
+      // available video input device as the default instead of the `""` id.
+      devices.requestDeviceNames();
+    }
+  }, [devices, videoInputId, videoTrack]);
 
   const [footerVm, setFooterVm] = useState<ViewModel<FooterSnapshot> | null>(
     null,

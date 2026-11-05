@@ -51,6 +51,7 @@ import { Grid, type TileProps } from "../grid/Grid";
 import { SpotlightTile } from "../tile/SpotlightTile";
 import {
   type EncryptionSystem,
+  type LocalMedia,
   type MatrixRTCMode,
 } from "@element-hq/matrixrtc-sdk";
 import { E2eeType } from "../e2ee/e2eeType";
@@ -110,7 +111,7 @@ import { useBehavior } from "../useBehavior.ts";
 import { useValueBehavior } from "../useValueBehavior.ts";
 import { Toast } from "../Toast.tsx";
 import overlayStyles from "../Overlay.module.css";
-import { useTrackProcessorState$ } from "../tracks/TrackProcessorContext.tsx";
+import { useBackgroundEffectsState$ } from "../tracks/BackgroundEffectsContext";
 import { type Layout } from "../state/layout-types.ts";
 import { ObservableScope } from "../state/ObservableScope.ts";
 import { CallFooter, type FooterSnapshot } from "../components/CallFooter.tsx";
@@ -141,6 +142,8 @@ export interface ActiveCallProps extends Omit<
   "vm" | "footerVm" | "developerSettingsVm"
 > {
   e2eeSystem: EncryptionSystem;
+  /** The tracks the lobby opened, for the join to publish. */
+  media: LocalMedia;
   // TODO refactor those reasons into an enum
   onLeft: (
     reason:
@@ -164,7 +167,7 @@ export const ActiveCall: FC<ActiveCallProps> = (props) => {
   const urlParams = useUrlParams();
   const hostBridge = useHostBridge();
   const mediaDevices = useMediaDevices();
-  const trackProcessorState$ = useTrackProcessorState$();
+  const backgroundEffectsState$ = useBackgroundEffectsState$();
   // The element we have to draw the call in: the page, or the container a host
   // gave us. Its size, not the window's, decides how the call is laid out.
   const rootElement = useRootElement();
@@ -184,7 +187,16 @@ export const ActiveCall: FC<ActiveCallProps> = (props) => {
     );
     const rtcParticipation = slot.join({
       ...rtcParticipationOptions(urlParams),
-      publish: initialPublishRequests(props.muteStates, mediaDevices, capture),
+      // Without a lobby nothing was captured and the join captures itself
+      publish:
+        props.media.requests.length > 0
+          ? props.media
+          : initialPublishRequests(
+              props.muteStates,
+              mediaDevices,
+              capture,
+              backgroundEffectsState$.value.processor,
+            ),
     });
 
     const vm = createCallViewModel$(
@@ -198,7 +210,7 @@ export const ActiveCall: FC<ActiveCallProps> = (props) => {
         encryptionSystem: props.e2eeSystem,
         capture,
         videoProcessor$: scope.behavior(
-          trackProcessorState$.pipe(map((state) => state.processor)),
+          backgroundEffectsState$.pipe(map((state) => state.processor)),
         ),
         hostBridge,
         autoLeaveWhenOthersLeft,
@@ -228,8 +240,9 @@ export const ActiveCall: FC<ActiveCallProps> = (props) => {
     urlParams,
     hostBridge,
     mediaDevices,
-    trackProcessorState$,
+    backgroundEffectsState$,
     props.client,
+    props.media,
     rootElement,
   ]);
 
@@ -262,7 +275,7 @@ export const ActiveCall: FC<ActiveCallProps> = (props) => {
     props.onLeft,
     urlParams,
     mediaDevices,
-    trackProcessorState$,
+    backgroundEffectsState$,
     props.client,
     vm,
     rootElement,

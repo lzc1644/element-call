@@ -73,7 +73,10 @@ import { useRootElement } from "../RootElementContext.ts";
 import { useHostBridge } from "../HostBridge.ts";
 import { useMuteStates } from "../state/useMuteStates.ts";
 import { useLeaveToHome } from "../LeaveToHomeContext.ts";
+import { type LocalMedia } from "@element-hq/matrixrtc-sdk";
+
 import { usePrejoinMedia } from "./usePrejoinMedia.ts";
+import { useLocalMedia } from "../useLocalMedia.ts";
 
 /**
  * If there already are this many participants in the call, we automatically mute
@@ -282,6 +285,8 @@ const LoadedCallView: FC<LoadedProps> = ({
 
   const mediaDevices = useMediaDevices();
   const latestMuteStates = useLatest(muteStates);
+  // Opened by the lobby, published by the call: one capture for both
+  const media = useLocalMedia();
 
   const enterRTCSessionOrError = useCallback(
     async (rtcSession: MatrixRTCSession): Promise<void> => {
@@ -540,6 +545,7 @@ const LoadedCallView: FC<LoadedProps> = ({
       <LobbyView
         client={client}
         matrixInfo={matrixInfo}
+        media={media}
         muteStates={muteStates}
         onEnter={() => setJoined(true)}
         confineToRoom={confineToRoom}
@@ -569,6 +575,7 @@ const LoadedCallView: FC<LoadedProps> = ({
           rtcSession={rtcSession as MatrixRTCSession}
           matrixRoom={room}
           onLeft={onLeft}
+          media={media}
           muteStates={muteStates}
           e2eeSystem={e2eeSystem}
           //otelGroupCallMembership={otelGroupCallMembership}
@@ -610,6 +617,7 @@ const LoadedCallView: FC<LoadedProps> = ({
   } else if (skipLobby) {
     body = (
       <SkipLobbyMediaPreflight
+        media={media}
         muteStates={muteStates}
         onReady={() => setJoined(true)}
       />
@@ -650,16 +658,18 @@ const LoadedCallView: FC<LoadedProps> = ({
 };
 
 interface SkipLobbyMediaPreflightProps {
+  media: LocalMedia;
   muteStates: MuteStates;
   onReady: () => void;
 }
 
 /** Waits for the initial browser media permission result before connecting. */
 function SkipLobbyMediaPreflight({
+  media,
   muteStates,
   onReady,
 }: SkipLobbyMediaPreflightProps): null {
-  const { ready } = usePrejoinMedia(muteStates, true);
+  const { ready } = usePrejoinMedia(muteStates, media);
 
   useEffect(() => {
     if (ready) onReady();

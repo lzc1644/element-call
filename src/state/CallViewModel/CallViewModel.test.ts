@@ -38,11 +38,12 @@ import { type Layout } from "../layout-types.ts";
 import {
   mockMatrixRoomMember,
   mockMediaDevices,
+  mockMuteStates,
+  flushPromises,
   mockRemoteParticipant,
   withTestScheduler,
   mockRtcMembership,
   testScope,
-  flushPromises,
   type MockRTCSession,
 } from "../../utils/test.ts";
 import { E2eeType } from "../../e2ee/e2eeType.ts";
@@ -84,8 +85,14 @@ import {
   type CallViewModel,
   type CallViewModelOptions,
   callViewModelOptionsFromParams,
+  initialPublishRequests,
 } from "./CallViewModel.ts";
 import { type HostRequest, nullHostBridge } from "../../HostBridge.ts";
+import { type Handler, MuteState } from "../MuteStates.ts";
+import {
+  type RTCParticipation,
+  type VideoProcessor,
+} from "@element-hq/matrixrtc-sdk";
 
 initializeWidget();
 
@@ -2174,5 +2181,52 @@ describe("callViewModelOptionsFromParams", () => {
   it("carries hideScreensharing", () => {
     const params = computeUrlParams("", widgetUrl("hideScreensharing=true"));
     expect(callViewModelOptionsFromParams(params).hideScreensharing).toBe(true);
+  });
+});
+
+describe("a camera with a video processor", () => {
+  const withCallViewModel = withCallViewModelInMode(MatrixRTCMode.Matrix_2_0);
+  const processor = { name: "effect" } as VideoProcessor;
+
+  /** The handler the view model gives the camera's mute switch. */
+  const cameraHandler = (setHandler: {
+    mock: { calls: [Handler][] };
+  }): Handler => setHandler.mock.calls[1][0];
+
+  it("starts each camera track with the processor", () => {
+    const muteStates = mockMuteStates();
+    vi.spyOn(muteStates.video.enabled$, "value", "get").mockReturnValue(true);
+    expect(
+      initialPublishRequests(
+        muteStates,
+        mockMediaDevices({}),
+        {},
+        processor,
+      ).find((request) => request.source === "camera"),
+    ).toMatchObject({ processor });
+  });
+
+  // The SDK builds the processor on the camera's restart, before the room
+  // sees a frame, so the track is unmuted rather than published anew
+  it("turns on a camera turned off before the processor was chosen", async () => {
+    const setHandler = vi.spyOn(MuteState.prototype, "setHandler");
+    onTestFinished(() => setHandler.mockRestore());
+    const videoProcessor$ = new BehaviorSubject<VideoProcessor | undefined>(
+      undefined,
+    );
+    let participation: RTCParticipation | undefined;
+    withCallViewModel(
+      {},
+      (_vm, _session, { rtcParticipation }) => {
+        participation = rtcParticipation;
+      },
+      { videoProcessor$ },
+    );
+    videoProcessor$.next(processor);
+    await cameraHandler(setHandler)(true);
+    await flushPromises();
+
+    expect(participation!.unpublish).not.toHaveBeenCalled();
+    expect(participation!.publish).not.toHaveBeenCalled();
   });
 });

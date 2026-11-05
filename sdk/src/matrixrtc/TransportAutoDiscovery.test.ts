@@ -65,7 +65,7 @@ describe("TransportAutoDiscovery", () => {
       );
       const discovery = new TransportAutoDiscovery({
         client,
-        transportType: "livekit",
+        transportTypes: ["m.livekit", "livekit"],
         fallbackTransport: serviceUrl ? configTransport : undefined,
         logger: rootLogger,
       });
@@ -88,7 +88,7 @@ describe("TransportAutoDiscovery", () => {
       .mockResolvedValue([backendTransport]);
     const discovery = new TransportAutoDiscovery({
       client,
-      transportType: "livekit",
+      transportTypes: ["m.livekit", "livekit"],
       fallbackTransport: configTransport,
       logger: rootLogger,
     });
@@ -112,7 +112,7 @@ describe("TransportAutoDiscovery", () => {
 
       const discovery = new TransportAutoDiscovery({
         client,
-        transportType: "livekit",
+        transportTypes: ["m.livekit", "livekit"],
         fallbackTransport: configTransport,
         logger: rootLogger,
       });
@@ -125,6 +125,29 @@ describe("TransportAutoDiscovery", () => {
       expect(client._unstable_getRTCTransports).toHaveBeenCalledTimes(1);
     },
   );
+
+  it("prefers a transport of an earlier type over one listed before it", async () => {
+    const mLivekit: Transport = {
+      type: "m.livekit",
+      url: "wss://sfu.example.org",
+    };
+    const client = makeClient();
+    client._unstable_getRTCTransports.mockResolvedValue([
+      backendTransport,
+      mLivekit,
+    ]);
+
+    const discovery = new TransportAutoDiscovery({
+      client,
+      transportTypes: ["m.livekit", "livekit"],
+      fallbackTransport: configTransport,
+      logger: rootLogger,
+    });
+
+    await expect(discovery.discoverPreferredTransport()).resolves.toStrictEqual(
+      mLivekit,
+    );
+  });
 
   it("Retries limit_exceeded backend transport", async () => {
     const client = makeClient();
@@ -143,7 +166,7 @@ describe("TransportAutoDiscovery", () => {
 
     const discovery = new TransportAutoDiscovery({
       client,
-      transportType: "livekit",
+      transportTypes: ["m.livekit", "livekit"],
       fallbackTransport: configTransport,
       logger: rootLogger,
     });
@@ -167,7 +190,7 @@ describe("TransportAutoDiscovery", () => {
 
       const discovery = new TransportAutoDiscovery({
         client,
-        transportType: "livekit",
+        transportTypes: ["m.livekit", "livekit"],
         fallbackTransport: configTransport,
         logger: rootLogger,
       });
@@ -184,7 +207,7 @@ describe("TransportAutoDiscovery", () => {
 
     const discovery = new TransportAutoDiscovery({
       client,
-      transportType: "livekit",
+      transportTypes: ["m.livekit", "livekit"],
       fallbackTransport: undefined,
       logger: rootLogger,
     });

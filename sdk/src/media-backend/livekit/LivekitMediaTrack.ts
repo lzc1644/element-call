@@ -50,7 +50,7 @@ import {
   type VideoMediaTrack,
 } from "../../media-api";
 import { MatrixRTCError } from "../../errors";
-import { convertToLivekitProcessor } from "./videoProcessor";
+import { toLivekitProcessor, type LivekitProcessor } from "./videoProcessor";
 
 export const mediaSources: Record<Track.Source, MediaSource> = {
   [Track.Source.Microphone]: "microphone",
@@ -197,9 +197,19 @@ export function createLocalLivekitMediaTrack(
     setDevice: async (deviceId: string): Promise<void> => {
       if (base.source !== "microphone" && base.source !== "camera")
         throw new MatrixRTCError(`A ${base.source} track has no device`);
+      // LiveKit decides whether to restart by the constraints it keeps, which
+      // a browser that does not echo the device id back (Firefox) leaves
+      // without one; a track already on the device is left alone here
+      const current = publication.track;
+      if (
+        current instanceof LocalTrack &&
+        current.mediaStreamTrack.getSettings().deviceId === deviceId
+      )
+        return;
       await room.switchActiveDevice(
         base.kind === "audio" ? "audioinput" : "videoinput",
         deviceId,
+        false,
       );
     },
   };
@@ -228,11 +238,17 @@ export function createLocalLivekitMediaTrack(
     },
     setProcessor: async (processor) => {
       const track = videoTrack();
-      // A processor cannot be built on a track that has already ended
-      if (!track || track.mediaStreamTrack.readyState === "ended") return;
-      if (processor)
-        await track.setProcessor(convertToLivekitProcessor(processor));
-      else if (track.getProcessor()) await track.stopProcessor();
+      // A camera that is off has a stopped track and takes the processor on
+      // turning on again; one stopped for good takes none
+      if (
+        !track ||
+        (track.mediaStreamTrack.readyState === "ended" && !track.isMuted)
+      )
+        return;
+      const current = track.getProcessor() as LivekitProcessor | undefined;
+      if (processor === current?.source) return;
+      if (processor) await track.setProcessor(toLivekitProcessor(processor));
+      else if (current) await track.stopProcessor();
     },
   };
 }

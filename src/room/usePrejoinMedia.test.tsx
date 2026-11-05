@@ -5,41 +5,24 @@ SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
 */
 
-import { act, render } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import { type JSX } from "react";
-import { BehaviorSubject, NEVER } from "rxjs";
-import { beforeEach, expect, test, vi } from "vitest";
+import { NEVER } from "rxjs";
+import { expect, test, vi } from "vitest";
+import { createLocalMedia, type LocalMedia } from "@element-hq/matrixrtc-sdk";
 
 import { MediaDevicesContext } from "../MediaDevicesContext";
-import { type MuteStates } from "../state/MuteStates";
+import { MuteStates } from "../state/MuteStates";
 import { constant } from "../state/Behavior";
-import { mockMediaDevices } from "../utils/test";
+import { nullHostBridge } from "../HostBridge";
+import { flushPromises, mockMediaDevices, testScope } from "../utils/test";
 import { usePrejoinMedia } from "./usePrejoinMedia";
 
-const previewTracks = vi.hoisted(() => ({
-  value: undefined as unknown[] | undefined,
-  options: [] as Array<{ audio: unknown; video: unknown }>,
-  onError: undefined as ((error: Error) => void) | undefined,
+const effects$ = constant({ supported: false, processor: undefined });
+vi.mock("../tracks/BackgroundEffectsContext", () => ({
+  useBackgroundEffectsState$: () => effects$,
 }));
-
-vi.mock("@livekit/components-react", () => ({
-  usePreviewTracks: (
-    options: unknown,
-    onError?: (error: Error) => void,
-  ): unknown[] | undefined => {
-    previewTracks.options.push(options as { audio: unknown; video: unknown });
-    previewTracks.onError = onError;
-    return previewTracks.value;
-  },
-}));
-
-vi.mock("../tracks/TrackProcessorContext", () => ({
-  useTrackProcessor: () => ({
-    supported: false,
-    processor: undefined,
-  }),
-  useTrackProcessorSync: (): void => {},
-}));
+vi.mock("./InCallView", () => ({ captureSettings: () => ({}) }));
 
 const mediaCombinations = [
   { name: "audio and video muted", audio: false, video: false },
@@ -49,83 +32,80 @@ const mediaCombinations = [
 ] as const;
 
 test.each(mediaCombinations)(
-  "uses each initial media toggle for a direct join ($name)",
-  ({ audio, video }) => {
-    previewTracks.value = undefined;
-    const rendered = renderPrejoinMedia(audio, video, true);
-    const options = latestPreviewOptions();
+  "prepares only enabled devices through the lobby model ($name)",
+  async ({ audio, video }) => {
+    const rendered = renderPrejoinMedia(audio, video);
+    if (!audio && !video) {
+      await waitFor(() =>
+        expect(rendered.getByTestId("ready")).toHaveTextContent("ready"),
+      );
+      expect(rendered.getUserMedia).not.toHaveBeenCalled();
+      return;
+    }
 
-    expect(options.audio).toEqual(audio ? { deviceId: "microphone" } : false);
-    expect(options.video).toEqual(
-      video ? { deviceId: "camera", processor: undefined } : false,
-    );
-    expect(rendered.getByTestId("ready")).toHaveTextContent(
-      audio || video ? "pending" : "ready",
-    );
+    await waitFor(() => expect(rendered.getUserMedia).toHaveBeenCalledOnce());
+    expect(rendered.getUserMedia).toHaveBeenCalledWith({
+      ...(audio && { audio: { deviceId: "microphone" } }),
+      ...(video && { video: { deviceId: "camera" } }),
+    });
+    expect(rendered.getByTestId("ready")).toHaveTextContent("pending");
 
-    rendered.updateTracks([]);
-    expect(rendered.getByTestId("ready")).toHaveTextContent("ready");
+    const tracks = [
+      ...(audio ? [rawTrack("audio")] : []),
+      ...(video ? [rawTrack("video")] : []),
+    ];
+    await act(async () => {
+      rendered.permission.resolve(streamOf(tracks));
+      await flushPromises();
+    });
+
+    await waitFor(() =>
+      expect(rendered.getByTestId("ready")).toHaveTextContent("ready"),
+    );
+    const handed = [...rendered.media.takeTracks().values()];
+    expect(handed.map(({ track }) => track)).toEqual(tracks);
+    expect(rendered.getUserMedia).toHaveBeenCalledOnce();
   },
 );
 
 test.each(mediaCombinations.filter(({ audio, video }) => audio || video))(
-  "mutes both direct-join toggles after permission rejection ($name)",
-  ({ audio, video }) => {
-    previewTracks.value = undefined;
-    const rendered = renderPrejoinMedia(audio, video, true);
-    expect(rendered.getByTestId("ready")).toHaveTextContent("pending");
+  "joins muted after a denied capture without retrying ($name)",
+  async ({ audio, video }) => {
+    const rendered = renderPrejoinMedia(audio, video);
+    await waitFor(() => expect(rendered.getUserMedia).toHaveBeenCalledOnce());
 
-    act(() => {
-      previewTracks.onError?.(new Error("Permission denied"));
+    await act(async () => {
+      rendered.permission.reject(new Error("Permission denied"));
+      await flushPromises();
     });
 
-    expect(rendered.audioSetEnabled).toHaveBeenCalledWith(false);
-    expect(rendered.videoSetEnabled).toHaveBeenCalledWith(false);
-    expect(rendered.getByTestId("ready")).toHaveTextContent("ready");
+    await waitFor(() =>
+      expect(rendered.getByTestId("ready")).toHaveTextContent("ready"),
+    );
+    expect(rendered.muteStates.audio.enabled$.value).toBe(false);
+    expect(rendered.muteStates.video.enabled$.value).toBe(false);
+    expect(rendered.getUserMedia).toHaveBeenCalledOnce();
   },
 );
 
-test("keeps lobby preauthorization for a fully muted call", () => {
-  previewTracks.value = undefined;
-  const rendered = renderPrejoinMedia(false, false, false);
+test("does not change mute switches when a denied permission arrives after unmount", async () => {
+  const rendered = renderPrejoinMedia(true, true);
+  await waitFor(() => expect(rendered.getUserMedia).toHaveBeenCalledOnce());
+  rendered.unmount();
 
-  expect(latestPreviewOptions()).toEqual({ audio: {}, video: false });
-  expect(rendered.getByTestId("ready")).toHaveTextContent("pending");
-
-  act(() => {
-    previewTracks.onError?.(new Error("Permission denied"));
+  await act(async () => {
+    rendered.permission.reject(new Error("Permission denied"));
+    await flushPromises();
   });
 
-  expect(rendered.getByTestId("ready")).toHaveTextContent("ready");
+  expect(rendered.muteStates.audio.enabled$.value).toBe(true);
+  expect(rendered.muteStates.video.enabled$.value).toBe(true);
 });
 
-test("does not throw when a pending permission callback arrives after unmount", () => {
-  previewTracks.value = undefined;
-  const rendered = renderPrejoinMedia(true, true, true);
-
-  rendered.unmount();
-  expect(() => {
-    act(() => {
-      previewTracks.onError?.(new Error("Permission denied"));
-    });
-  }).not.toThrow();
-});
-
-beforeEach(() => {
-  previewTracks.value = undefined;
-  previewTracks.options = [];
-  previewTracks.onError = undefined;
-});
-
-function renderPrejoinMedia(
-  audioEnabled: boolean,
-  videoEnabled: boolean,
-  onlyWhenEnabled: boolean,
-) {
-  const { muteStates, audioSetEnabled, videoSetEnabled } = createMuteStates(
-    audioEnabled,
-    videoEnabled,
-  );
+function renderPrejoinMedia(audioEnabled: boolean, videoEnabled: boolean) {
+  const permission = Promise.withResolvers<MediaStream>();
+  const getUserMedia = vi.fn(async () => permission.promise);
+  const media = createLocalMedia(getUserMedia);
   const mediaDevices = mockMediaDevices({
     audioInput: {
       available$: constant(
@@ -133,10 +113,7 @@ function renderPrejoinMedia(
           ["microphone", { type: "name" as const, name: "Microphone" }],
         ]),
       ),
-      selected$: constant({
-        id: "microphone",
-        hardwareDeviceChange$: NEVER,
-      }),
+      selected$: constant({ id: "microphone", hardwareDeviceChange$: NEVER }),
       select: vi.fn(),
     },
     videoInput: {
@@ -147,74 +124,47 @@ function renderPrejoinMedia(
       select: vi.fn(),
     },
   });
-  const view = (): JSX.Element => (
-    <MediaDevicesContext value={mediaDevices}>
-      <PrejoinMediaHarness
-        muteStates={muteStates}
-        onlyWhenEnabled={onlyWhenEnabled}
-      />
-    </MediaDevicesContext>
+  const muteStates = new MuteStates(
+    testScope(),
+    mediaDevices,
+    { audioEnabled, videoEnabled },
+    nullHostBridge,
   );
-  const rendered = render(view());
-
   return {
-    ...rendered,
-    audioSetEnabled,
-    videoSetEnabled,
-    updateTracks(value: unknown[] | undefined): void {
-      previewTracks.value = value;
-      rendered.rerender(view());
-    },
-  };
-}
-
-function latestPreviewOptions(): { audio: unknown; video: unknown } {
-  const options = previewTracks.options.at(-1);
-  if (options === undefined)
-    throw new Error("Preview options were not captured");
-  return options;
-}
-
-function createMuteStates(
-  audioEnabled: boolean,
-  videoEnabled: boolean,
-): {
-  muteStates: MuteStates;
-  audioSetEnabled: ReturnType<typeof vi.fn>;
-  videoSetEnabled: ReturnType<typeof vi.fn>;
-} {
-  const audioEnabled$ = new BehaviorSubject(audioEnabled);
-  const videoEnabled$ = new BehaviorSubject(videoEnabled);
-  const audioSetEnabled = vi.fn((enabled: boolean) =>
-    audioEnabled$.next(enabled),
-  );
-  const videoSetEnabled = vi.fn((enabled: boolean) =>
-    videoEnabled$.next(enabled),
-  );
-
-  return {
-    muteStates: {
-      audio: {
-        enabled$: audioEnabled$,
-        setEnabled$: constant(audioSetEnabled),
-      },
-      video: {
-        enabled$: videoEnabled$,
-        setEnabled$: constant(videoSetEnabled),
-      },
-    } as unknown as MuteStates,
-    audioSetEnabled,
-    videoSetEnabled,
+    ...render(
+      <MediaDevicesContext value={mediaDevices}>
+        <PrejoinMediaHarness muteStates={muteStates} media={media} />
+      </MediaDevicesContext>,
+    ),
+    media,
+    muteStates,
+    getUserMedia,
+    permission,
   };
 }
 
 function PrejoinMediaHarness({
   muteStates,
-  onlyWhenEnabled,
+  media,
 }: {
   muteStates: MuteStates;
-  onlyWhenEnabled: boolean;
+  media: LocalMedia;
 }): JSX.Element {
-  const { ready } = usePrejoinMedia(muteStates, onlyWhenEnabled);
+  const { ready } = usePrejoinMedia(muteStates, media);
   return <output data-testid="ready">{ready ? "ready" : "pending"}</output>;
+}
+
+function rawTrack(kind: "audio" | "video"): MediaStreamTrack {
+  return {
+    kind,
+    id: `${kind}-track`,
+    getSettings: () => ({
+      deviceId: kind === "audio" ? "microphone" : "camera",
+    }),
+    stop: vi.fn(),
+  } as unknown as MediaStreamTrack;
+}
+
+function streamOf(tracks: MediaStreamTrack[]): MediaStream {
+  return { getTracks: () => tracks } as unknown as MediaStream;
 }

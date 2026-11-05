@@ -5,116 +5,48 @@ SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
 */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { usePreviewTracks } from "@livekit/components-react";
-import {
-  type CreateLocalTracksOptions,
-  type LocalAudioTrack,
-  type LocalVideoTrack,
-  Track,
-} from "livekit-client";
-import { logger } from "matrix-js-sdk/lib/logger";
-import { convertToLivekitProcessor } from "@element-hq/matrixrtc-sdk";
+import { useEffect, useState } from "react";
+import { constant, type LocalMedia } from "@element-hq/matrixrtc-sdk";
+import { map } from "rxjs";
 
 import { useMediaDevices } from "../MediaDevicesContext";
 import { type MuteStates } from "../state/MuteStates";
-import { useInitial } from "../useInitial";
+import { ObservableScope } from "../state/ObservableScope";
 import {
-  useTrackProcessor,
-  useTrackProcessorSync,
-} from "../tracks/TrackProcessorContext";
-import { getValue } from "../utils/observable";
+  createLobbyMediaViewModel,
+  type LobbyMediaViewModel,
+} from "../state/LobbyMediaViewModel";
+import { useBackgroundEffectsState$ } from "../tracks/BackgroundEffectsContext";
 import { useBehavior } from "../useBehavior";
+import { captureSettings } from "./InCallView";
 
-interface PrejoinMedia {
-  tracks: Array<LocalAudioTrack | LocalVideoTrack> | undefined;
-  ready: boolean;
-}
+const notReady = constant(false);
 
-/**
- * Opens preview tracks before joining so browser media permission is settled
- * before LiveKit starts connecting.
- *
- * @param onlyWhenEnabled Skip opening devices when both media kinds are muted.
- *   The lobby always prepares permissions, while direct joins must preserve the
- *   existing privacy behavior for muted calls.
- */
+/** Runs the lobby's device preparation before a direct join, on the media it will publish. */
 export function usePrejoinMedia(
   muteStates: MuteStates,
-  onlyWhenEnabled = false,
-): PrejoinMedia {
-  const audioEnabled = useBehavior(muteStates.audio.enabled$);
-  const videoEnabled = useBehavior(muteStates.video.enabled$);
-  const shouldPrepare = !onlyWhenEnabled || audioEnabled || videoEnabled;
+  media: LocalMedia,
+): { ready: boolean } {
   const devices = useMediaDevices();
-  const videoInputId = useBehavior(devices.videoInput.selected$)?.id;
-
-  const initialAudioOptions = useInitial(
-    () =>
-      audioEnabled && {
-        deviceId: getValue(devices.audioInput.selected$)?.id,
-      },
-  );
-  const { processor } = useTrackProcessor();
-  const initialProcessor = useInitial(() => processor);
-  const localTrackOptions = useMemo<CreateLocalTracksOptions>(
-    () => ({
-      // Audio is opened with video so the browser shows one permission prompt.
-      // Clone the options because LiveKit mutates the object it receives.
-      audio:
-        shouldPrepare &&
-        (initialAudioOptions === false && onlyWhenEnabled
-          ? false
-          : Object.assign({}, initialAudioOptions)),
-      video: shouldPrepare &&
-        videoEnabled && {
-          deviceId: videoInputId,
-          processor:
-            initialProcessor && convertToLivekitProcessor(initialProcessor),
-        },
-    }),
-    [
-      initialAudioOptions,
-      initialProcessor,
-      onlyWhenEnabled,
-      shouldPrepare,
-      videoEnabled,
-      videoInputId,
-    ],
-  );
-  const [preparationFailed, setPreparationFailed] = useState(false);
-  const onError = useCallback(
-    (error: Error) => {
-      logger.error("Error while creating preview Tracks:", error);
-      setPreparationFailed(true);
-      muteStates.audio.setEnabled$.value?.(false);
-      muteStates.video.setEnabled$.value?.(false);
-    },
-    [muteStates],
-  );
-  const tracks = usePreviewTracks(localTrackOptions, onError);
-  const videoTrack = useMemo(
-    () =>
-      (tracks?.find((track) => track.kind === Track.Kind.Video) ??
-        null) as LocalVideoTrack | null,
-    [tracks],
-  );
+  const backgroundEffectsState$ = useBackgroundEffectsState$();
+  const [vm, setVm] = useState<LobbyMediaViewModel | null>(null);
 
   useEffect(() => {
-    if (videoTrack && videoInputId === undefined) {
-      devices.requestDeviceNames();
-    }
-  }, [devices, videoInputId, videoTrack]);
+    const scope = new ObservableScope();
+    setVm(
+      createLobbyMediaViewModel(
+        scope,
+        media,
+        muteStates,
+        devices,
+        captureSettings(),
+        scope.behavior(
+          backgroundEffectsState$.pipe(map((state) => state.processor)),
+        ),
+      ),
+    );
+    return (): void => scope.end();
+  }, [media, muteStates, devices, backgroundEffectsState$]);
 
-  useTrackProcessorSync(videoTrack);
-
-  return {
-    tracks,
-    // A direct join waits until a failed permission request has propagated the
-    // muted state. Otherwise ActiveCall could immediately request media again.
-    ready:
-      !shouldPrepare ||
-      tracks !== undefined ||
-      (!onlyWhenEnabled && preparationFailed),
-  };
+  return { ready: useBehavior(vm?.ready$ ?? notReady) };
 }
