@@ -9,8 +9,10 @@ import { expect, test } from "@playwright/test";
 
 import { widgetTest } from "../fixtures/widget-user.ts";
 import { TestHelpers } from "./test-helpers.ts";
+import { SpaHelpers } from "../spa-helpers.ts";
 
 widgetTest.use({ callType: "dm" });
+widgetTest.describe.configure({ timeout: 90_000 });
 
 widgetTest(
   "Start a new voice call in DM as widget",
@@ -23,6 +25,7 @@ widgetTest(
     const { brooks, whistler } = asWidget;
 
     await TestHelpers.startCallInCurrentRoom(brooks.page, true);
+    await TestHelpers.approveWidgetPermissions(brooks.page);
 
     await expect(
       brooks.page.locator('iframe[title="Element Call"]'),
@@ -43,6 +46,7 @@ widgetTest(
       .getByRole("alert")
       .getByRole("button", { name: "Join" })
       .click();
+    await TestHelpers.approveWidgetPermissions(whistler.page);
 
     await expect(
       whistler.page.locator('iframe[title="Element Call"]'),
@@ -91,7 +95,7 @@ widgetTest(
     await expect(brooks.page.locator(".mx_BasicMessageComposer")).toBeVisible();
 
     // ASSERT hanging up on one side ends the call for both
-    await brooksFrame.getByRole("button", { name: "End call" }).click();
+    await SpaHelpers.leaveCall(brooksFrame);
 
     // The widget should be closed on both sides
     await expect(
@@ -114,6 +118,7 @@ widgetTest(
     const { brooks, whistler } = asWidget;
 
     await TestHelpers.startCallInCurrentRoom(brooks.page, false);
+    await TestHelpers.approveWidgetPermissions(brooks.page);
 
     await expect(
       brooks.page.locator('iframe[title="Element Call"]'),
@@ -136,6 +141,7 @@ widgetTest(
       .getByRole("alert")
       .getByRole("button", { name: "Join" })
       .click();
+    await TestHelpers.approveWidgetPermissions(whistler.page);
 
     await expect(
       whistler.page.locator('iframe[title="Element Call"]'),
@@ -181,7 +187,7 @@ widgetTest(
     ).not.toBeVisible();
 
     // ASSERT hanging up on one side ends the call for both
-    await brooksFrame.getByRole("button", { name: "End call" }).click();
+    await SpaHelpers.leaveCall(brooksFrame);
 
     // The widget should be closed on both sides and the timeline should be back on screen
     await expect(
@@ -202,6 +208,7 @@ widgetTest(
     const { brooks, whistler } = asWidget;
 
     await TestHelpers.startCallInCurrentRoom(brooks.page, false);
+    await TestHelpers.approveWidgetPermissions(brooks.page);
 
     await expect(
       brooks.page.locator('iframe[title="Element Call"]'),

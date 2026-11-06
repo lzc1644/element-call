@@ -7,6 +7,8 @@ Please see LICENSE in the repository root for full details.
 
 import { expect, test } from "@playwright/test";
 
+import { SpaHelpers } from "./spa-helpers.ts";
+
 test("Start a new call then leave and show the feedback screen", async ({
   page,
 }) => {
@@ -46,7 +48,7 @@ test("Start a new call then leave and show the feedback screen", async ({
   await expect(page.getByRole("button", { name: "Reactions" })).toBeVisible();
 
   // leave the call
-  await page.getByTestId("incall_leave").click();
+  await SpaHelpers.leaveCall(page);
   await expect(page.getByRole("heading")).toContainText(
     "John Doe, your call has ended. How did it go?",
   );

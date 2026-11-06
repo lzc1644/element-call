@@ -16,11 +16,11 @@ import {
 } from "matrix-js-sdk";
 import { logger } from "matrix-js-sdk/lib/logger";
 import {
-  type CallMembership,
   MatrixRTCSessionEvent,
   type MatrixRTCSession,
 } from "matrix-js-sdk/lib/matrixrtc";
-import { Subject } from "rxjs";
+import { type RTCSlot } from "@element-hq/matrixrtc-sdk";
+import { combineLatest, map, Observable, of, Subject, switchMap } from "rxjs";
 
 import {
   isCallTerminationEvent,
@@ -52,15 +52,15 @@ function isPositiveFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
-function membershipKey(membership: CallMembership): string {
-  return `${membership.userId}\u0000${membership.eventId}`;
-}
+export type CallTerminationSource =
+  | MatrixRTCSession
+  | { room: MatrixRoom; slot: RTCSlot };
 
-function membershipBelongsToSession(
-  membership: CallMembership,
-  rtcSession: MatrixRTCSession,
-): boolean {
-  return membership.slotId === rtcSession.slotId;
+interface TerminationMembership {
+  userId: string;
+  deviceId: string;
+  eventId: string;
+  createdTs: number;
 }
 
 /**
@@ -82,6 +82,7 @@ export class CallTerminationReader {
   private readonly liveEventIds = new Set<string>();
   private readonly observedMemberships = new Map<string, ObservedMembership>();
   private localJoinedAt: number | undefined;
+  private readonly room: MatrixRoom;
 
   /**
    * Emits an admitted termination, including another device on this account
@@ -91,62 +92,40 @@ export class CallTerminationReader {
 
   public constructor(
     private readonly scope: ObservableScope,
-    private readonly rtcSession: MatrixRTCSession,
+    source: CallTerminationSource,
     private readonly client: MatrixClient,
   ) {
-    this.observeMemberships(this.rtcSession.memberships);
-    this.rtcSession.on(
-      MatrixRTCSessionEvent.MembershipsChanged,
-      this.handleMembershipsChanged,
-    );
-    this.scope.onEnd(() =>
-      this.rtcSession.off(
-        MatrixRTCSessionEvent.MembershipsChanged,
-        this.handleMembershipsChanged,
-      ),
-    );
+    this.room = source.room;
+    terminationMemberships$(source)
+      .pipe(scope.bind())
+      .subscribe((memberships) => this.observeMemberships(memberships));
 
     // `liveEvent` excludes back-pagination and cache insertion. A decrypted
     // event is accepted later only when this live timeline pass remembered its
     // event ID.
-    this.rtcSession.room.on(MatrixRoomEvent.Timeline, this.handleTimelineEvent);
+    this.room.on(MatrixRoomEvent.Timeline, this.handleTimelineEvent);
     this.scope.onEnd(() =>
-      this.rtcSession.room.off(
-        MatrixRoomEvent.Timeline,
-        this.handleTimelineEvent,
-      ),
+      this.room.off(MatrixRoomEvent.Timeline, this.handleTimelineEvent),
     );
 
-    this.rtcSession.room.client.on(
-      MatrixEventEvent.Decrypted,
-      this.handleDecryptedEvent,
-    );
+    this.room.client.on(MatrixEventEvent.Decrypted, this.handleDecryptedEvent);
     this.scope.onEnd(() =>
-      this.rtcSession.room.client.off(
+      this.room.client.off(
         MatrixEventEvent.Decrypted,
         this.handleDecryptedEvent,
       ),
     );
   }
 
-  private handleMembershipsChanged = (
-    _oldMemberships: CallMembership[],
-    memberships: CallMembership[],
-  ): void => {
-    this.observeMemberships(memberships);
-  };
-
-  private observeMemberships(memberships: CallMembership[]): void {
+  private observeMemberships(memberships: TerminationMembership[]): void {
     const now = Date.now();
     this.pruneDepartedMemberships(now);
     const currentKeys = new Set<string>();
 
     for (const membership of memberships) {
-      if (!membershipBelongsToSession(membership, this.rtcSession)) continue;
-
-      const key = membershipKey(membership);
+      const key = `${membership.userId}\u0000${membership.eventId}`;
       currentKeys.add(key);
-      const createdTs = membership.createdTs();
+      const createdTs = membership.createdTs;
       // A live timeline insertion (including delayed decryption) can belong to
       // our previous join. Use this device's membership, not another device of
       // the same account, and never move the admission boundary backwards.
@@ -227,7 +206,7 @@ export class CallTerminationReader {
    * Handle incoming Matrix events, filtering for termination events.
    */
   private handleTerminationEvent = (event: MatrixEvent): void => {
-    const room = this.rtcSession.room;
+    const room = this.room;
     const eventId = event.getId();
 
     // Decrypted events might come from a different room.
@@ -341,4 +320,48 @@ export class CallTerminationReader {
       this.emittedEventIds.delete(oldestEventId);
     }
   }
+}
+
+function terminationMemberships$(
+  source: CallTerminationSource,
+): Observable<TerminationMembership[]> {
+  if ("slot" in source) {
+    if (source.slot.roomId !== source.room.roomId)
+      throw new Error("The termination source must belong to the call's room");
+    return source.slot.members$.pipe(
+      switchMap((members) =>
+        members.length === 0
+          ? of([])
+          : combineLatest(
+              members.map((member) =>
+                member.membershipEvent$.pipe(
+                  map((event) => ({
+                    userId: member.userId,
+                    deviceId: member.deviceId,
+                    ...event,
+                  })),
+                ),
+              ),
+            ),
+      ),
+    );
+  }
+
+  // Preserve callers that explicitly supply their own JS-SDK session.
+  return new Observable((subscriber) => {
+    const update = (): void =>
+      subscriber.next(
+        source.memberships
+          .filter((membership) => membership.slotId === source.slotId)
+          .map((membership) => ({
+            userId: membership.userId,
+            deviceId: membership.deviceId,
+            eventId: membership.eventId,
+            createdTs: membership.createdTs(),
+          })),
+      );
+    update();
+    source.on(MatrixRTCSessionEvent.MembershipsChanged, update);
+    return () => source.off(MatrixRTCSessionEvent.MembershipsChanged, update);
+  });
 }

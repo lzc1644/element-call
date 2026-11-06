@@ -9,7 +9,6 @@ import { type Meta, type StoryObj } from "@storybook/react-vite";
 import { expect, userEvent, waitFor, within } from "storybook/test";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { animated } from "@react-spring/web";
-import { BehaviorSubject } from "rxjs";
 import { Button } from "@vector-im/compound-web";
 
 import styles from "./InCallView.module.css";
@@ -25,10 +24,8 @@ import {
   SpotlightTileViewModel,
   type TileViewModel,
 } from "../state/TileViewModel";
-import {
-  type Alignment,
-  type SpotlightExpandedLayout,
-} from "../state/layout-types";
+import { type SpotlightExpandedLayout } from "../state/layout-types";
+import { createFloatingTile } from "../state/FloatingTile";
 import { createRingingMedia } from "../state/media/RingingMediaViewModel";
 import { useStaticViewModel } from "../state/ViewModel";
 import { useBehavior } from "../useBehavior";
@@ -101,22 +98,21 @@ function MemberVisibilityStory({
         constant(true),
         constant("transparent"),
       ),
-      pip: new GridTileViewModel(
-        constant(
-          createRingingMedia({
-            id: "preview",
-            userId: "@presenter:example.org",
-            displayName$: constant("Presenter"),
-            mxcAvatarUrl$: constant(undefined),
-            pickupState$: constant("ringing"),
-            intent: "video",
-          }),
+      pip: {
+        ...createFloatingTile(scope, { block: "start", inline: "end" }),
+        vm: new GridTileViewModel(
+          constant(
+            createRingingMedia({
+              id: "preview",
+              userId: "@presenter:example.org",
+              displayName$: constant("Presenter"),
+              mxcAvatarUrl$: constant(undefined),
+              pickupState$: constant("ringing"),
+              intent: "video",
+            }),
+          ),
         ),
-      ),
-      pipAlignment$: new BehaviorSubject<Alignment>({
-        block: "start",
-        inline: "end",
-      }),
+      },
     });
     return (): void => scope.end();
   }, []);
@@ -233,6 +229,8 @@ export const MembersVisible: Story = {
       await expect(
         (camera as HTMLVideoElement).readyState,
       ).toBeGreaterThanOrEqual(2);
+      await expect(camera.getBoundingClientRect().width).toBeGreaterThan(0);
+      await expect(getComputedStyle(camera.parentElement!).opacity).toBe("1");
     });
     const footer = canvas.getByTestId("footer-container");
     const toolbar = footer.querySelector<HTMLElement>(

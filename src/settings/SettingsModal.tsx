@@ -9,7 +9,6 @@ import { type FC, type ReactNode, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { type MatrixClient } from "matrix-js-sdk";
 import { Button, Root as Form, Separator } from "@vector-im/compound-web";
-import { type Room as LivekitRoom } from "livekit-client";
 
 import { Modal } from "../Modal";
 import styles from "./SettingsModal.module.css";
@@ -22,16 +21,21 @@ import { useHostBridge } from "../HostBridge";
 import {
   useSetting,
   soundEffectVolume as soundEffectVolumeSetting,
-  backgroundBlur as backgroundBlurSetting,
+  backgroundEffect as backgroundEffectSetting,
   developerMode,
 } from "./settings";
 import { PreferencesSettingsTab } from "./PreferencesSettingsTab";
 import { Slider } from "../Slider";
 import { DeviceSelection } from "./DeviceSelection";
-import { useTrackProcessor } from "../livekit/TrackProcessorContext";
+import { useBackgroundEffects } from "../tracks/BackgroundEffectsContext";
+import {
+  parseEffect,
+  serializeEffect,
+} from "../tracks/backgroundEffectCatalog";
 import {
   DeveloperSettingsTab,
   type DeveloperSettingsSnapshot,
+  type TransportInfo,
 } from "./DeveloperSettingsTab";
 import { FieldRow, InputField } from "../input/Input";
 import { useSubmitRageshake } from "./submit-rageshake";
@@ -56,11 +60,8 @@ interface Props {
   onTabChange: (tab: SettingsTab) => void;
   client: MatrixClient;
   roomId?: string;
-  livekitRooms?: {
-    room: LivekitRoom;
-    url: string;
-    role: "publisher" | "subscriber";
-  }[];
+  /** The transports the client is connected to, while in a call. */
+  transports?: TransportInfo[];
   /** Only available while in a call. Used by the developer tab. */
   developerSettingsVm?: ViewModel<DeveloperSettingsSnapshot>;
 }
@@ -74,16 +75,18 @@ export const SettingsModal: FC<Props> = ({
   onTabChange,
   client,
   roomId,
-  livekitRooms,
+  transports,
   developerSettingsVm,
 }) => {
   const { t } = useTranslation();
 
   // Generate a `Checkbox` input to turn blur on or off.
   const BlurCheckbox: React.FC = (): ReactNode => {
-    const { supported } = useTrackProcessor();
+    const { supported } = useBackgroundEffects();
 
-    const [blurActive, setBlurActive] = useSetting(backgroundBlurSetting);
+    // The camera menu's setting, of which this control sees only blur.
+    const [effect, setEffect] = useSetting(backgroundEffectSetting);
+    const blurActive = parseEffect(effect).kind === "blur";
 
     return (
       <>
@@ -97,8 +100,12 @@ export const SettingsModal: FC<Props> = ({
               supported ? "" : t("settings.blur_not_supported_by_browser")
             }
             type="checkbox"
-            checked={!!blurActive}
-            onChange={(b): void => setBlurActive(b.target.checked)}
+            checked={blurActive}
+            onChange={(b): void =>
+              setEffect(
+                serializeEffect({ kind: b.target.checked ? "blur" : "none" }),
+              )
+            }
             disabled={!supported}
           />
         </FieldRow>
@@ -227,7 +234,7 @@ export const SettingsModal: FC<Props> = ({
       <DeveloperSettingsTab
         env={import.meta.env}
         client={client}
-        livekitRooms={livekitRooms}
+        transports={transports}
         roomId={roomId}
         vm={developerSettingsVm ?? outOfCallDeveloperSettingsTabViewModel}
       />

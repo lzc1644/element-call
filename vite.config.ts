@@ -7,6 +7,7 @@ Please see LICENSE in the repository root for full details.
 
 import {
   loadEnv,
+  type Plugin,
   type PluginOption,
   searchForWorkspaceRoot,
   type ConfigEnv,
@@ -23,6 +24,7 @@ import babel from "@rolldown/plugin-babel";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import { realpathSync } from "fs";
 import * as fs from "node:fs";
+import { fileURLToPath } from "node:url";
 
 export const vitePluginsConfig = ({
   mode,
@@ -42,10 +44,12 @@ export const vitePluginsConfig = ({
     }),
     react(),
     wasm(),
-    nodePolyfills({
-      // Enables the 'events' module, which is required by the matrix-js-sdk
-      include: ["events"],
-    }),
+    exceptMediaPipeWasm(
+      nodePolyfills({
+        // Enables the 'events' module, which is required by the matrix-js-sdk
+        include: ["events"],
+      }),
+    ),
     svgrPlugin({
       svgrOptions: {
         // This enables ref forwarding on SVGR components, which is needed, for
@@ -89,7 +93,18 @@ export const vitePluginsConfig = ({
     );
   }
 
-  return { plugins };
+  return {
+    plugins,
+    resolve: {
+      alias: {
+        // The SDK by its package name, resolved to its source, for every
+        // config built on this one: see the matching entry in tsconfig.json
+        "@element-hq/matrixrtc-sdk": fileURLToPath(
+          new URL("./sdk/index.ts", import.meta.url),
+        ),
+      },
+    },
+  };
 };
 // https://vitejs.dev/config/
 // Modified type helper from defineConfig to allow for packageType (see defineConfig from vite)
@@ -161,6 +176,9 @@ export default ({
         // which Vite for some reason refuses to work with, so we point it to
         // src/index.ts instead
         "matrix-widget-api": "matrix-widget-api/src/index.ts",
+        "@element-hq/matrixrtc-sdk": fileURLToPath(
+          new URL("./sdk/index.ts", import.meta.url),
+        ),
       },
       dedupe: [
         "react",
@@ -176,3 +194,31 @@ export default ({
     },
   };
 };
+
+/**
+ * Keeps a plugin's transform off MediaPipe's WASM loader. The loader is a
+ * classic script that sets `self.ModuleFactory`; transformed into a module it
+ * sets nothing, and the segmenter fails with "ModuleFactory not set".
+ */
+function exceptMediaPipeWasm(plugins: PluginOption): PluginOption {
+  const isLoader = (id: string): boolean =>
+    id.includes("tasks-vision") && id.includes("wasm");
+  return (Array.isArray(plugins) ? plugins : [plugins]).map((plugin) => {
+    if (
+      !plugin ||
+      typeof plugin !== "object" ||
+      !("transform" in plugin) ||
+      typeof plugin.transform !== "function"
+    )
+      return plugin;
+    const transform = plugin.transform;
+    const wrapped: Plugin = {
+      ...plugin,
+      transform(code, id, options) {
+        if (isLoader(id)) return null;
+        return transform.call(this, code, id, options);
+      },
+    };
+    return wrapped;
+  });
+}

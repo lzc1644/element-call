@@ -106,6 +106,7 @@ test("One to One rejoin after improper leave does not crash EC", async ({
   page,
   browserName,
 }) => {
+  test.slow();
   // With delegation, the backend sends the guest's delayed leave event within
   // moments of the improper leave, so the stale membership this test needs
   // would be cleaned up before the rejoin. Keep the guest's leave

@@ -9,6 +9,7 @@ import { type Meta, type StoryObj } from "@storybook/react-vite";
 import { expect, userEvent, waitFor, within } from "storybook/test";
 import { type ReactNode, useEffect, useState } from "react";
 import { Button } from "@vector-im/compound-web";
+import { NEVER } from "rxjs";
 
 import styles from "./InCallView.module.css";
 import { RootElementProvider } from "../RootElementContext";
@@ -34,8 +35,7 @@ function PipLayoutStory({ screenShare }: { screenShare: boolean }): ReactNode {
       userId: "@presenter:example.org",
       displayName$: constant("Presenter"),
       mxcAvatarUrl$: constant(undefined),
-      participant$: constant(null),
-      livekitRoom$: constant(undefined),
+      member: { local: true, tracks$: constant(null), encryptionError$: NEVER },
       transport$: constant(undefined),
       encryptionSystem: { kind: E2eeType.NONE } as const,
     };
@@ -47,7 +47,6 @@ function PipLayoutStory({ screenShare }: { screenShare: boolean }): ReactNode {
             rtcBackendIdentity: "presenter",
             handRaised$: constant(null),
             reaction$: constant(null),
-            statsType: "outbound-rtp",
           }),
           local: true as const,
           mirror$: constant(false),

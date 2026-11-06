@@ -117,7 +117,7 @@ for (const screenShareCase of screenShareCases) {
         assertGeometry(measurements, screenShareCase.name);
 
         const selectedShare = viewerPage.locator(
-          '[data-id][aria-hidden="false"]:has(video[data-lk-source="screen_share"])',
+          '[data-id][aria-hidden="false"]:has(video[data-source="screenShare"])',
         );
         const selectedShareId = await selectedShare.getAttribute("data-id");
         for (let cycle = 0; cycle < 2; cycle++) {
@@ -167,7 +167,7 @@ async function assertLayoutReady(page: Page): Promise<void> {
   await expect(fixedGrid).toHaveCount(1);
   await expect(scrollingGrid).toHaveCount(1);
   await expect(
-    fixedGrid.locator('video[data-lk-source="screen_share"]'),
+    fixedGrid.locator('video[data-source="screenShare"]'),
   ).toBeVisible({ timeout: 30_000 });
   const participantTiles = scrollingGrid.locator('[data-testid="videoTile"]');
   await expect(participantTiles).toHaveCount(2);
@@ -246,7 +246,7 @@ async function measureGeometry(
   const footerLocator = page.getByTestId("footer-container");
   const { fixedGrid, scrollingGrid } = getLayoutLayers(callView);
   const screenShareVideo = fixedGrid.locator(
-    'video[data-lk-source="screen_share"]',
+    'video[data-source="screenShare"]',
   );
   const screenShareTile = screenShareVideo.locator(
     'xpath=ancestor::*[@data-testid="videoTile"][1]',

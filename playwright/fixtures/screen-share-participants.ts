@@ -105,7 +105,7 @@ export async function withScreenShareParticipants<T>(
     await expect(shareButton).toHaveAttribute("aria-checked", "true");
 
     await expect(
-      viewerPage.locator('video[data-lk-source="screen_share"]'),
+      viewerPage.locator('video[data-source="screenShare"]'),
     ).toBeVisible({ timeout: 30_000 });
 
     result = await callback({ desktopPage, viewerPage, inviteLink });

@@ -7,15 +7,34 @@ Please see LICENSE in the repository root for full details.
 */
 
 import {
-  type BaseKeyProvider,
-  type ConnectionState,
-  ExternalE2EEKeyProvider,
-  type Room as LivekitRoom,
-  type RoomOptions,
-  type RemoteParticipant,
-} from "livekit-client";
-import { type MatrixClient, type Room as MatrixRoom } from "matrix-js-sdk";
+  type AudioCaptureSettings,
+  type Behavior,
+  constant,
+  type DisconnectReason,
+  type EncryptionSystem,
+  generateItems,
+  type LocalAudioMediaTrack,
+  type LocalRTCMember,
+  type LocalVideoMediaTrack,
+  type RTCParticipation,
+  type ObservableScope,
+  pauseWhen,
+  type PublishRequest,
+  type RemoteRTCMember,
+  trackBySource$,
+  type TransportMetadata,
+  type VideoCaptureSettings,
+  type VideoProcessor,
+} from "@element-hq/matrixrtc-sdk";
+import {
+  KnownMembership,
+  type MatrixClient,
+  type Room as MatrixRoom,
+  type RoomMember,
+  RoomStateEvent,
+} from "matrix-js-sdk";
 import { EventStatus, type MatrixEvent } from "matrix-js-sdk/lib/models/event";
+import { v4 as uuidv4 } from "uuid";
 import {
   BehaviorSubject,
   combineLatest,
@@ -24,7 +43,6 @@ import {
   fromEvent,
   map,
   merge,
-  NEVER,
   type Observable,
   of,
   pairwise,
@@ -40,40 +58,15 @@ import {
   throttleTime,
   timer,
   takeUntil,
-  from,
-  concatWith,
-  catchError,
-  switchAll,
 } from "rxjs";
-import { type Logger, logger as rootLogger } from "matrix-js-sdk/lib/logger";
-import {
-  MembershipManagerEvent,
-  type UnstableLivekitTransport,
-  type MatrixRTCSession,
-  type RTCCallIntent,
-  type RTCNotificationType,
-} from "matrix-js-sdk/lib/matrixrtc";
-import { type CallMembershipIdentityParts } from "matrix-js-sdk/lib/matrixrtc/EncryptionManager";
-import { v4 as uuidv4 } from "uuid";
-import { type IMembershipManager } from "matrix-js-sdk/lib/matrixrtc/IMembershipManager";
+import { logger as rootLogger } from "matrix-js-sdk/lib/logger";
 
-import {
-  createToggle$,
-  filterBehavior,
-  generateItems,
-  mapScoped,
-  pauseWhen,
-} from "../../utils/observable";
+import { createToggle$ } from "../../utils/observable";
 import {
   duplicateTiles,
   playReactionsSound,
   showReactions,
 } from "../../settings/settings";
-import { Config } from "../../config/Config";
-import {
-  MatrixRTCMode,
-  type ResolvedDelayedLeaveTimings,
-} from "../../config/ConfigOptions";
 import { platform } from "../../Platform";
 import { setPipEnabled$ } from "../../controls";
 import { TileStore } from "../TileStore";
@@ -82,30 +75,33 @@ import { spotlightExpandedLayout } from "../SpotlightExpandedLayout";
 import { oneOnOneDesktopLayout } from "../OneOnOneDesktopLayout";
 import { oneOnOneMobileLayout } from "../OneOnOneMobileLayout";
 import { pipLayout } from "../PipLayout";
-import { type EncryptionSystem } from "../../e2ee/sharedKeyManagement";
 import {
   type RaisedHandInfo,
   type ReactionInfo,
   type ReactionOption,
 } from "../../reactions";
-import { shallowEquals as shallowArrayEquals } from "../../utils/array";
-import { shallowEquals as shallowObjectEquals } from "../../utils/object";
+import { shallowEquals as arrayShallowEquals } from "../../utils/array";
 import { type MediaDevices } from "../MediaDevices";
-import { constant, type Behavior } from "../Behavior";
-import { E2eeType } from "../../e2ee/e2eeType";
-import { MatrixKeyProvider } from "../../e2ee/matrixKeyProvider";
 import { type MuteStates } from "../MuteStates";
+import {
+  followDevice,
+  followMuteState,
+  followProcessor,
+  type TrackSupply,
+} from "../localMediaControls";
 import { HeaderStyle, type UrlParams } from "../../UrlParams";
-import { type ProcessorState } from "../../livekit/TrackProcessorContext";
 import { type HostBridge, nullHostBridge } from "../../HostBridge";
 import {
   CallTerminationEventType,
   createCallTerminationContent,
   type TerminationEvent,
 } from "../../callTermination";
-import { CallTerminationReader } from "../../callTermination/CallTerminationReader";
 import {
-  type Alignment,
+  CallTerminationReader,
+  type CallTerminationSource,
+} from "../../callTermination/CallTerminationReader";
+import {
+  layoutShallowEquals,
   type Layout,
   type LayoutMedia,
   type WindowMode,
@@ -116,45 +112,18 @@ import {
   computeSpotlight,
   type OneOnOneMedia,
 } from "../layoutMedia.ts";
-import { ElementCallError, UnknownCallError } from "../../utils/errors.ts";
-import { Epoch, type ObservableScope } from "../ObservableScope.ts";
-import { createHomeserverConnected$ } from "./localMember/HomeserverConnected.ts";
 import {
-  createLocalMembership$,
-  enterRTCSession,
-  TransportState,
-} from "./localMember/LocalMember.ts";
-import { getLocalTransport } from "./localMember/LocalTransport.ts";
-import {
-  createKeyRotationSuppressed$,
-  createMemberships$,
-  membershipsAndTransports$,
-} from "../SessionBehaviors.ts";
-import {
-  type ConnectionFactory,
-  ECConnectionFactory,
-} from "./remoteMembers/ConnectionFactory.ts";
-import {
-  ConnectionMap,
-  createConnectionMap$,
-} from "./remoteMembers/ConnectionMap.ts";
-import {
-  createRemoteMatrixLivekitMembers$,
-  type LocalMatrixLivekitMember,
-  type RemoteMatrixLivekitMember,
-} from "./remoteMembers/MatrixLivekitMembers.ts";
+  type ElementCallError,
+  fromMatrixRTCError,
+  UnknownCallError,
+} from "../../utils/errors.ts";
+import { PosthogAnalytics } from "../../analytics/PosthogAnalytics.ts";
 import {
   type AutoLeaveReason,
+  type CallNotificationWrapper,
   createCallNotificationLifecycle$,
   createReceivedDecline$,
-  createSentCallNotification$,
 } from "./CallNotificationLifecycle.ts";
-import {
-  createMatrixMemberMetadata$,
-  createRoomMembers$,
-} from "./remoteMembers/MatrixMemberMetadata.ts";
-import { Publisher } from "./localMember/Publisher.ts";
-import { type Connection } from "./remoteMembers/Connection.ts";
 import {
   type LayoutSwitchViewModel,
   createLayoutSwitchViewModel,
@@ -173,27 +142,70 @@ import {
   type RingingMediaViewModel,
 } from "../media/RingingMediaViewModel.ts";
 import { type GridTileViewModel } from "../TileViewModel.ts";
-import { type TransportLocator } from "../../livekit/auth";
+import { createFloatingTile } from "../FloatingTile.ts";
 
-//TODO
-// Larger rename
-// member,membership -> rtcMember
-// participant -> livekitParticipant
-// matrixLivekitItem -> callMember
-// js-sdk
-// callMembership -> rtcMembership
+/** How a call captures and encodes the tracks it publishes. */
+export interface CaptureSettings {
+  audio?: AudioCaptureSettings;
+  camera?: VideoCaptureSettings;
+  screenShare?: VideoCaptureSettings;
+}
+
+/**
+ * What to publish for a microphone or camera: the device the user picked, the
+ * host's capture settings and, for the camera, the video processor, so that
+ * the track starts with it rather than letting the room through while it is
+ * built.
+ */
+export function publishRequest(
+  source: "microphone" | "camera",
+  mediaDevices: MediaDevices,
+  capture: CaptureSettings,
+  processor?: VideoProcessor,
+): PublishRequest {
+  return source === "microphone"
+    ? {
+        source,
+        deviceId: mediaDevices.audioInput.selected$.value?.id,
+        capture: capture.audio,
+      }
+    : {
+        source,
+        deviceId: mediaDevices.videoInput.selected$.value?.id,
+        capture: capture.camera,
+        ...(processor && { processor }),
+      };
+}
+
+/** What the participation publishes at the join: the sources whose mute switch is on. */
+export function initialPublishRequests(
+  muteStates: MuteStates,
+  mediaDevices: MediaDevices,
+  capture: CaptureSettings,
+  processor?: VideoProcessor,
+): PublishRequest[] {
+  const requests: PublishRequest[] = [];
+  if (muteStates.audio.enabled$.value)
+    requests.push(publishRequest("microphone", mediaDevices, capture));
+  if (muteStates.video.enabled$.value)
+    requests.push(publishRequest("camera", mediaDevices, capture, processor));
+  return requests;
+}
+
 export interface CallViewModelOptions {
   encryptionSystem: EncryptionSystem;
+  /**
+   * How our tracks are captured and encoded; the browser's and LiveKit's
+   * defaults otherwise.
+   */
+  capture?: CaptureSettings;
+  /** Background blur and the like, applied to the camera as it changes. */
+  videoProcessor$?: Behavior<VideoProcessor | undefined>;
   /**
    * The application hosting Element Call, which can ask it to hang up and wants
    * to know when the user joins or leaves. Defaults to no host.
    */
   hostBridge?: HostBridge;
-  /**
-   * Whether the app hosting Element Call controls the audio output devices,
-   * rather than the browser. Defaults to false.
-   */
-  controlledAudioDevices?: boolean;
   /** The style of header to show. Defaults to {@link HeaderStyle.Standard}. */
   header?: HeaderStyle;
   /** Whether the call controls should be shown. Defaults to true. */
@@ -201,21 +213,22 @@ export interface CallViewModelOptions {
   /** Whether to hide the screen-sharing button. Defaults to false. */
   hideScreensharing?: boolean;
   /**
-   * Whether and what kind of notification to send when joining the call.
+   * Whether the host routes the audio itself, outside the browser, so that
+   * the selected output device is never handed to the client. Defaults to
+   * false.
    */
-  sendNotificationType?: RTCNotificationType;
-  /** The kind of call being placed. */
-  callIntent?: RTCCallIntent;
+  controlledAudioDevices?: boolean;
   autoLeaveWhenOthersLeft?: boolean;
   /**
    * If the call is started in a way where we want it to behave like a telephone usecase
    * If we sent a notification event, we want the ui to show a ringing state
    */
   waitForCallPickup?: boolean;
-  /** Optional factory to create LiveKit rooms, mainly for testing purposes. */
-  livekitRoomFactory?: (options?: RoomOptions) => LivekitRoom;
-  /** Optional behavior overriding the local connection state, mainly for testing purposes. */
-  connectionState$?: Behavior<ConnectionState>;
+  /**
+   * The call notification the client sent with its join, for the ringing UI.
+   * Defaults to none sent.
+   */
+  sentCallNotification$?: Observable<CallNotificationWrapper | null>;
   /**
    * The size of the space the call is drawn in: the page when Element Call
    * owns it, or the container a host mounted it in when it is a component.
@@ -225,12 +238,6 @@ export interface CallViewModelOptions {
    * changed.
    */
   windowSize$: Behavior<{ width: number; height: number }>;
-  /** Optional value overriding the local transport, for testing purposes. */
-  localTransport?: TransportLocator;
-  /** Optional value overriding the connection factory, for testing purposes. */
-  connectionFactory?: ConnectionFactory;
-  /** The version & compatibility mode of MatrixRTC that we should use. */
-  matrixRTCMode?: MatrixRTCMode;
   /** Optional behavior overriding for the screensharing, for testing */
   toggleScreensharing?: () => void;
   /** Optional termination event factory, mainly for testing purposes. */
@@ -239,16 +246,13 @@ export interface CallViewModelOptions {
 
 export type CreateTermination$ = (
   scope: ObservableScope,
-  matrixRTCSession: MatrixRTCSession,
+  source: CallTerminationSource,
   client: MatrixClient,
 ) => Observable<TerminationEvent>;
 
 /** Create the Matrix termination event stream for a call's lifetime. */
-export const createTermination$: CreateTermination$ = (
-  scope,
-  matrixRTCSession,
-  client,
-) => new CallTerminationReader(scope, matrixRTCSession, client).termination$;
+export const createTermination$: CreateTermination$ = (scope, source, client) =>
+  new CallTerminationReader(scope, source, client).termination$;
 
 /**
  * The options {@link createCallViewModel$} takes from the parameters Element
@@ -267,20 +271,13 @@ export function callViewModelOptionsFromParams(
   params: UrlParams,
 ): Pick<
   CallViewModelOptions,
-  | "controlledAudioDevices"
-  | "header"
-  | "showControls"
-  | "hideScreensharing"
-  | "sendNotificationType"
-  | "callIntent"
+  "header" | "showControls" | "hideScreensharing" | "controlledAudioDevices"
 > {
   return {
-    controlledAudioDevices: params.controlledAudioDevices,
     header: params.header,
     showControls: params.showControls,
     hideScreensharing: params.hideScreensharing,
-    sendNotificationType: params.sendNotificationType,
-    callIntent: params.callIntent,
+    controlledAudioDevices: params.controlledAudioDevices,
   };
 }
 
@@ -298,12 +295,6 @@ interface LayoutScanState {
   overflowing: boolean;
   tiles: TileStore;
 }
-
-export type LivekitRoomItem = {
-  livekitRoom: LivekitRoom;
-  participants: string[];
-  transport: TransportLocator;
-};
 
 /**
  * The return of createCallViewModel$
@@ -340,12 +331,8 @@ export interface CallViewModel {
    */
   terminateCall: () => Promise<void>;
   terminationState$: Behavior<CallTerminationState>;
-  // joining
-  join: () => void;
 
-  /**
-   * calls requestDisconnect. The async leave state can than be observed via connected$
-   */
+  /** Leaves the participation. The leave can then be observed via `leave$`. */
   leave: () => void;
   // screen sharing
   /**
@@ -403,12 +390,11 @@ export interface CallViewModel {
    * key is generated when someone joins or leaves.
    */
   keyRotationSuppressed$: Behavior<boolean>;
-  allConnections$: Behavior<Connection[]>;
-  /** Participants sorted by livekit room so they can be used in the audio rendering */
-  livekitRoomItems$: Behavior<LivekitRoomItem[]>;
-  /** use the layout instead, this is just for the sdk export. */
-  remoteMatrixLivekitMembers$: Behavior<RemoteMatrixLivekitMember[]>;
-  localMatrixLivekitMember$: Behavior<LocalMatrixLivekitMember | null>;
+  /** The local member, once our membership has been seen in the room. */
+  localMember$: Behavior<LocalRTCMember | null>;
+  remoteMembers$: Behavior<RemoteRTCMember[]>;
+  /** The transports the client holds a connection to, for the developer panel. */
+  connectedTransports$: Behavior<TransportMetadata[]>;
   /** List of participants raising their hand */
   handsRaised$: Behavior<Record<string, RaisedHandInfo>>;
   /** List of reactions. Keys are: membership.membershipId (currently predefined as: `${membershipEvent.userId}:${membershipEvent.deviceId}`)*/
@@ -495,36 +481,28 @@ export interface CallViewModel {
     switch: () => void;
   } | null>;
 
-  /**
-   * Whether the app is currently reconnecting to the LiveKit server and/or setting the matrix rtc room state.
-   */
+  /** Connected once, and currently not: to the homeserver, the session or the media transport. */
   reconnecting$: Behavior<boolean>;
-
-  /**
-   * Shortcut for not requireing to parse and combine connectionState.matrix and connectionState.livekit
-   */
-  connected$: Behavior<boolean>;
 }
 
 /**
  * A view model providing all the application logic needed to show the in-call
  * UI (may eventually be expanded to cover the lobby and feedback screens in the
  * future).
+ *
+ * The slot and the participation — memberships, transports, media — are the
+ * SDK's; this adds everything that makes it a call.
  */
-// Throughout this class and related code we must distinguish between MatrixRTC
-// state and LiveKit state. We use the common terminology of room "members", RTC
-// "memberships", and LiveKit "participants".
 export function createCallViewModel$(
   scope: ObservableScope,
+  rtcParticipation: RTCParticipation,
   // A call is permanently tied to a single Matrix room
-  matrixRTCSession: MatrixRTCSession,
   matrixRoom: MatrixRoom,
   mediaDevices: MediaDevices,
   muteStates: MuteStates,
   options: CallViewModelOptions,
   handsRaisedSubject$: Observable<Record<string, RaisedHandInfo>>,
   reactionsSubject$: Observable<Record<string, ReactionInfo>>,
-  trackProcessorState$: Behavior<ProcessorState>,
 ): CallViewModel {
   const logger = rootLogger.getChild("[CallViewModel]");
   const client = matrixRoom.client;
@@ -537,283 +515,137 @@ export function createCallViewModel$(
   // so that callers which don't care (chiefly tests) behave as they always have.
   const {
     hostBridge = nullHostBridge,
-    controlledAudioDevices = false,
     header = HeaderStyle.Standard,
     showControls = true,
     hideScreensharing = false,
-    sendNotificationType,
-    callIntent,
+    sentCallNotification$ = of(null),
   } = options;
 
   const termination$ = (options.createTermination$ ?? createTermination$)(
     scope,
-    matrixRTCSession,
+    { room: matrixRoom, slot: rtcParticipation.slot },
     client,
   );
 
-  const livekitKeyProvider = getE2eeKeyProvider(
-    options.encryptionSystem,
-    matrixRTCSession,
+  const { capture = {}, videoProcessor$ = constant(undefined) } = options;
+  const localTracks$ = scope.behavior<
+    (LocalAudioMediaTrack | LocalVideoMediaTrack)[]
+  >(
+    rtcParticipation.localMember$.pipe(
+      switchMap((member) => member?.tracks$ ?? of(null)),
+      map((tracks) => tracks ?? []),
+    ),
+  );
+  // Our own tracks, which carry the controls remote ones lack
+  const microphone$ = trackBySource$(
+    scope,
+    localTracks$,
+    "microphone",
+  ) as Behavior<LocalAudioMediaTrack | undefined>;
+  const camera$ = trackBySource$(scope, localTracks$, "camera") as Behavior<
+    LocalVideoMediaTrack | undefined
+  >;
+  const screenShare$ = trackBySource$(
+    scope,
+    localTracks$,
+    "screenShare",
+  ) as Behavior<LocalVideoMediaTrack | undefined>;
+
+  const supply = (source: "microphone" | "camera"): TrackSupply => ({
+    publish: async () =>
+      rtcParticipation.publish(
+        publishRequest(
+          source,
+          mediaDevices,
+          capture,
+          source === "camera" ? videoProcessor$.value : undefined,
+        ),
+      ),
+  });
+  followMuteState(
+    scope,
+    muteStates.audio,
+    microphone$,
+    supply("microphone"),
+    "microphone",
     logger,
   );
-  // matrix_rtc_mode in config.json overrides the user's Developer Settings choice.
-  // It is validated at config load (src/config/Config.ts) so the cast is safe.
-  const configMatrixRTCMode = Config.get().matrix_rtc_mode as
-    | MatrixRTCMode
-    | undefined;
-  const matrixRTCMode =
-    configMatrixRTCMode ?? options.matrixRTCMode ?? MatrixRTCMode.Compatibility;
-
-  // Each hbar seperates a block of input variables required for the CallViewModel to function.
-  // The outputs of this block is written under the hbar.
-  //
-  // For mocking purposes it is recommended to only mock the functions creating those outputs.
-  // All other fields are just temp computations for the mentioned output.
-  // The class does not need anything except the values underneath the bar.
-  // The creations of the values under the bar are all tested independently and testing the callViewModel Should
-  // not test their creation. Call view model only needs:
-  //  - memberships$ via createMemberships$
-  //  - localMembership via createLocalMembership$
-  //  - callLifecycle via createCallNotificationLifecycle$
-  //  - matrixMemberMetadataStore via createMatrixMemberMetadata$
-
-  // ------------------------------------------------------------------------
-  // memberships$
-  const memberships$ = createMemberships$(scope, matrixRTCSession);
-
-  // ------------------------------------------------------------------------
-  // matrixLivekitMembers$ AND localMembership
-
-  const membershipsAndTransports = membershipsAndTransports$(
+  followMuteState(
     scope,
-    memberships$,
+    muteStates.video,
+    camera$,
+    supply("camera"),
+    "camera",
+    logger,
   );
-
-  const ownMembershipIdentity: CallMembershipIdentityParts = {
-    userId,
-    deviceId,
-    // Consumed by the sticky membership manager as `member.id`, *and* stamped
-    // into every to-device key event by the key transport. A pre-sticky
-    // membership advertises `${userId}:${deviceId}` as its `membershipID`
-    // instead, so a uuid there names a member no peer can resolve.
-    memberId:
-      matrixRTCMode === MatrixRTCMode.Matrix_2_0
-        ? uuidv4()
-        : `${userId}:${deviceId}`,
-  };
-
-  const localTransport$ = options.localTransport
-    ? constant(options.localTransport)
-    : from(getLocalTransport(client));
-
-  const connectionFactory =
-    options.connectionFactory ??
-    new ECConnectionFactory(
-      client,
-      matrixRoom.roomId,
-      matrixRTCSession.slotId,
-      mediaDevices,
-      trackProcessorState$,
-      livekitKeyProvider,
-      controlledAudioDevices,
-      options.livekitRoomFactory,
-    );
-
-  const connectionMap$ = scope.behavior<Epoch<ConnectionMap>>(
-    localTransport$.pipe(
-      catchError(() => NEVER), // Swallow errors
-      concatWith(NEVER), // So the Observable doesn't complete prematurely
-      mapScoped("connectionMap$", (localTransport, scope) =>
-        createConnectionMap$({
-          scope,
-          connectionFactory,
-          localTransport,
-          remoteTransports$: membershipsAndTransports.transports$,
-          logger,
-          ownMembershipIdentity,
-        }),
-      ),
-      switchAll(),
-    ),
-    new Epoch(new ConnectionMap()),
-  );
-
-  const remoteMatrixLivekitMembers$: Behavior<
-    Epoch<RemoteMatrixLivekitMember[]>
-  > = createRemoteMatrixLivekitMembers$({
-    scope: scope,
-    membershipsWithTransport$:
-      membershipsAndTransports.membershipsWithTransport$,
-    connectionMap$,
-    localUser: { userId, deviceId },
-  });
-
-  const localMembership = createLocalMembership$({
+  // Enabling the microphone can recreate the native audio session.
+  muteStates.audio.enabled$
+    .pipe(
+      pairwise(),
+      filter(([wasEnabled, enabled]) => !wasEnabled && enabled),
+      scope.bind(),
+    )
+    .subscribe(() => mediaDevices.audioOutputSession?.reapplySelection());
+  followDevice(
     scope,
-    homeserverConnected: createHomeserverConnected$(
-      scope,
-      client,
-      matrixRTCSession,
-    ),
-    muteStates,
-    joinMatrixRTC: (
-      transport: UnstableLivekitTransport,
-      delayedLeaveTimings: ResolvedDelayedLeaveTimings,
-    ) => {
-      return enterRTCSession(
-        matrixRTCSession,
-        ownMembershipIdentity,
-        transport,
-        {
-          encryptMedia: livekitKeyProvider !== undefined,
-          matrixRTCMode,
-          delayedLeaveTimings,
-          sendNotificationType,
-          callIntent,
-        },
-      );
-    },
-    createPublisherFactory: (connection: Connection) => {
-      return new Publisher(
-        connection,
-        mediaDevices,
-        muteStates,
-        trackProcessorState$,
-        logger.getChild(`[Publisher ${JSON.stringify(connection.transport)}]`),
-        controlledAudioDevices,
-      );
-    },
-    connectionMap$,
-    client,
-    matrixRTCSession,
-    localTransport$,
-    roomId: matrixRoom.roomId,
-    hideScreensharing,
-    hostBridge,
-    baseUrl: client.baseUrl,
-    ownMembershipIdentity,
-    delayId$: scope.behavior(
-      (
-        fromEvent(
-          matrixRTCSession,
-          MembershipManagerEvent.DelayIdChanged,
-          // The type of reemitted event includes the original emitted as the second arg.
-        ) as Observable<[string | undefined, IMembershipManager]>
-      ).pipe(map(([delayId]) => delayId ?? null)),
-      matrixRTCSession.delayId ?? null,
-    ),
-    logger: logger.getChild(`[${Date.now()}]`),
-  });
-
-  const localRtcMembership$ = scope.behavior(
-    memberships$.pipe(
-      map(
-        (memberships) =>
-          memberships.value.find(
-            (membership) =>
-              membership.userId === userId && membership.deviceId === deviceId,
-          ) ?? null,
-      ),
-    ),
+    microphone$,
+    mediaDevices.audioInput,
+    "microphone",
+    logger,
   );
+  followDevice(scope, camera$, mediaDevices.videoInput, "camera", logger);
 
-  const localMatrixLivekitMember$: Behavior<LocalMatrixLivekitMember | null> =
-    scope.behavior(
-      localRtcMembership$.pipe(
-        filterBehavior((membership) => membership !== null),
-        map((membership$) => {
-          if (membership$ === null) return null;
-          return {
-            membership$,
-            participant: {
-              type: "local" as const,
-              value$: localMembership.participant$,
-            },
-            connection$: localMembership.connection$,
-            userId,
-          };
-        }),
-      ),
-    );
+  // The output device follows the selection onto the client the same way. A
+  // host that routes audio itself picks the output outside the browser, so the
+  // client is left alone
+  if (!options.controlledAudioDevices)
+    mediaDevices.audioOutput.selected$
+      .pipe(scope.bind())
+      .subscribe((selected) => {
+        if (selected === undefined) return;
+        rtcParticipation.setAudioOutputDeviceId(selected.id).catch((e) => {
+          logger.error("Failed to switch the audio output device", e);
+        });
+      });
 
-  const matrixLivekitMembers$ = scope.behavior(
+  followProcessor(scope, camera$, videoProcessor$, logger);
+
+  const members$ = scope.behavior<(LocalRTCMember | RemoteRTCMember)[]>(
     combineLatest(
-      [localMatrixLivekitMember$, remoteMatrixLivekitMembers$],
-      (local, remote) => [...(local === null ? [] : [local]), ...remote.value],
+      [rtcParticipation.localMember$, rtcParticipation.remoteMembers$],
+      (local, remote) => (local === null ? remote : [local, ...remote]),
     ),
   );
 
-  // ------------------------------------------------------------------------
-  // matrixMemberMetadataStore
-
-  const matrixRoomMembers$ = createRoomMembers$(scope, matrixRoom);
-  const matrixMemberMetadataStore = createMatrixMemberMetadata$(
-    scope,
-    scope.behavior(memberships$.pipe(map((mems) => mems.value))),
-    matrixRoomMembers$,
+  const matrixRoomMembers$ = scope.behavior(
+    fromEvent(matrixRoom, RoomStateEvent.Members).pipe(
+      map(() => roomMembers(matrixRoom)),
+    ),
+    roomMembers(matrixRoom),
   );
-
-  // ------------------------------------------------------------------------
-  // callLifecycle
 
   // TODO if we are in "unknown" state we need a loading rendering (or empty screen)
   // Otherwise it looks like we already connected and only than the ringing starts which is weird.
   const { ringAttempts$, autoLeave$ } = createCallNotificationLifecycle$({
     scope,
-    memberships$,
-    matrixRoomMembers$,
-    sentCallNotification$: createSentCallNotification$(scope, matrixRTCSession),
+    memberUserIds$: scope.behavior(
+      members$.pipe(map((members) => members.map((m) => m.userId))),
+    ),
+    roomMemberUserIds$: scope.behavior(
+      matrixRoomMembers$.pipe(map((members) => members.map((m) => m.userId))),
+    ),
+    sentCallNotification$,
     receivedDecline$: createReceivedDecline$(matrixRoom),
     options,
     localUser: { userId, deviceId },
   });
 
-  const allConnections$ = scope.behavior(
-    connectionMap$.pipe(map((d) => d.value.getConnections())),
-  );
-
-  const livekitRoomItems$ = scope.behavior<LivekitRoomItem[]>(
-    remoteMatrixLivekitMembers$.pipe(
-      // Flatten the members to a snapshot of their current connections and
-      // participant objects
-      switchMap(({ value: members }) => {
-        if (members.length === 0) return of([]);
-        return combineLatest(
-          members.map((m) =>
-            combineLatest(
-              [m.connection$, m.participant.value$],
-              (connection, participant) => ({ connection, participant }),
-            ),
-          ),
-        );
-      }),
-      // Keep only those with a defined connection and participant
-      map((members) =>
-        members.filter(
-          (
-            m,
-          ): m is { connection: Connection; participant: RemoteParticipant } =>
-            m.connection !== null && m.participant !== null,
-        ),
-      ),
-      // Group members by connection
-      map((members) =>
-        [...Map.groupBy(members, (m) => m.connection)].map(
-          ([connection, members]) => ({
-            transport: {
-              transport: connection.transport,
-              serverName: connection.serverName,
-            },
-            livekitRoom: connection.livekitRoom,
-            participants: members.map((m) => m.participant.identity),
-          }),
-        ),
-      ),
-    ),
+  const reconnecting$ = scope.behavior(
+    rtcParticipation.state$.pipe(map((state) => state.kind === "reconnecting")),
   );
 
   const handsRaised$ = scope.behavior(
-    handsRaisedSubject$.pipe(pauseWhen(localMembership.reconnecting$)),
+    handsRaisedSubject$.pipe(pauseWhen(reconnecting$)),
   );
 
   const reactions$ = scope.behavior(
@@ -826,7 +658,7 @@ export function createCallViewModel$(
           ]),
         ),
       ),
-      pauseWhen(localMembership.reconnecting$),
+      pauseWhen(reconnecting$),
     ),
   );
 
@@ -834,59 +666,49 @@ export function createCallViewModel$(
    * List of user media (camera feeds) that we want tiles for.
    */
   const userMedia$ = scope.behavior<WrappedUserMediaViewModel[]>(
-    combineLatest([matrixLivekitMembers$, duplicateTiles.value$]).pipe(
-      // Generate a collection of user media from the list of expected (whether
-      // present or missing) LiveKit participants.
+    combineLatest([members$, duplicateTiles.value$]).pipe(
+      // Generate a collection of user media from the list of members, whether
+      // their media is present or still missing.
       generateItems(
         "CallViewModel userMedia$",
         function* ([members, duplicateTiles]) {
-          for (const {
-            userId,
-            participant,
-            connection$,
-            membership$,
-          } of members) {
-            const rtcId = membership$.value.rtcBackendIdentity;
-            const mediaId = `${userId}:${membership$.value.deviceId}`;
+          for (const member of members) {
+            const mediaId = `${member.userId}:${member.deviceId}`;
+            // A device that rejoins after an improper leave has two
+            // memberships until the stale one expires, so the key is the
+            // membership's own id, which the backend identity no longer
+            // tells apart
             for (let dup = 0; dup < 1 + duplicateTiles; dup++) {
               yield {
-                keys: [dup, mediaId, userId, participant, connection$, rtcId],
-                data: undefined,
+                keys: [dup, mediaId, member.memberId],
+                data: member,
               };
             }
           }
         },
-        (scope, _, dup, mediaId, userId, participant, connection$, rtcId) =>
-          createWrappedUserMedia(scope, {
+        (scope, member$, dup, mediaId, _memberId) => {
+          const member = member$.value;
+          return createWrappedUserMedia(scope, {
             id: `${mediaId}:${dup}`,
-            userId,
-            rtcBackendIdentity: rtcId,
-            participant,
+            userId: member.userId,
+            rtcBackendIdentity: member.rtcBackendIdentity,
+            member,
             encryptionSystem: options.encryptionSystem,
-            livekitRoom$: scope.behavior(
-              connection$.pipe(map((c) => c?.livekitRoom)),
-            ),
             transport$: scope.behavior(
-              connection$.pipe(map((c) => c?.transport)),
+              member.transport$.pipe(map((transport) => transport?.raw)),
             ),
             mediaDevices,
-            pretendToBeDisconnected$: localMembership.reconnecting$,
-            displayName$: scope.behavior(
-              matrixMemberMetadataStore
-                .createDisplayNameBehavior$(scope, userId)
-                .pipe(map((name) => name ?? userId)),
-            ),
-            mxcAvatarUrl$: matrixMemberMetadataStore.createAvatarUrlBehavior$(
-              scope,
-              userId,
-            ),
+            pretendToBeDisconnected$: reconnecting$,
+            displayName$: member.displayName$,
+            mxcAvatarUrl$: member.avatarUrl$,
             handRaised$: scope.behavior(
               handsRaised$.pipe(map((v) => v[mediaId]?.time ?? null)),
             ),
             reaction$: scope.behavior(
               reactions$.pipe(map((v) => v[mediaId] ?? undefined)),
             ),
-          }),
+          });
+        },
       ),
     ),
   );
@@ -902,26 +724,23 @@ export function createCallViewModel$(
               if (pickupState !== "accept")
                 yield { keys: [intent, recipient], data: pickupState };
             },
-            (scope, pickupState$, intent, userId) =>
-              createRingingMedia({
+            (scope, pickupState$, intent, userId) => {
+              const member$ = matrixRoomMembers$.pipe(
+                map((members) => members.find((m) => m.userId === userId)),
+              );
+              return createRingingMedia({
                 id: `ringing:${userId}`,
                 userId,
                 displayName$: scope.behavior(
-                  matrixRoomMembers$.pipe(
-                    map(
-                      (members) =>
-                        members.get(userId)?.rawDisplayName || userId,
-                    ),
-                  ),
+                  member$.pipe(map((m) => m?.rawDisplayName || userId)),
                 ),
-                mxcAvatarUrl$:
-                  matrixMemberMetadataStore.createAvatarUrlBehavior$(
-                    scope,
-                    userId,
-                  ),
+                mxcAvatarUrl$: scope.behavior(
+                  member$.pipe(map((m) => m?.getMxcAvatarUrl())),
+                ),
                 pickupState$,
                 intent,
-              }),
+              });
+            },
           ),
           map(([media]) => media ?? null),
         ),
@@ -930,9 +749,6 @@ export function createCallViewModel$(
     ),
   );
 
-  /**
-   * All screen share media that we want to display.
-   */
   const screenShares$ = scope.behavior<ScreenShareViewModel[]>(
     userMedia$.pipe(
       switchMap((userMedia) =>
@@ -964,14 +780,12 @@ export function createCallViewModel$(
    *  - There can be multiple participants for one Matrix user if they join from
    *    multiple devices.
    */
+  // One per membership, so one user may count several times
   const participantCount$ = scope.behavior(
-    matrixLivekitMembers$.pipe(map((ms) => ms.length)),
+    rtcParticipation.slot.members$.pipe(map((members) => members.length)),
   );
 
-  const keyRotationSuppressed$ = createKeyRotationSuppressed$(
-    scope,
-    matrixRTCSession,
-  );
+  const keyRotationSuppressed$ = rtcParticipation.keyRotationSuppressed$;
 
   const leaveSoundEffect$ = userMedia$.pipe(
     pairwise(),
@@ -994,6 +808,7 @@ export function createCallViewModel$(
   const terminationState$ = scope.behavior(terminationStateSubject$);
   let failedTerminationEvent: MatrixEvent | undefined;
   let stopped = false;
+  let left = false;
   scope.onEnd(stopTermination);
 
   const hostHangup$ = hostBridge.hangUp$.pipe(
@@ -1015,10 +830,7 @@ export function createCallViewModel$(
   );
   // Retain the result before disconnect can tear down the scope, even when
   // SDK callers have not yet subscribed or mounted a view.
-  leave$.subscribe(() => {
-    stopTermination();
-    localMembership.requestDisconnect();
-  });
+  leave$.subscribe(() => leave());
 
   const terminateCall = async (): Promise<void> => {
     if (stopped || terminationStateSubject$.value === "sending") return;
@@ -1100,7 +912,7 @@ export function createCallViewModel$(
               bins.sort(([, bin1], [, bin2]) => bin1 - bin2).map(([m]) => m),
             );
       }),
-      distinctUntilChanged(shallowArrayEquals),
+      distinctUntilChanged(arrayShallowEquals),
     ),
   );
 
@@ -1132,13 +944,18 @@ export function createCallViewModel$(
       [ringingMedia$, screenShares$, spotlightSpeaker$, localUserMediaForPip$],
       (ringing, screenShares, speaker, localPip) =>
         computeSpotlight({ ringing, screenShares, speaker, localPip }),
-    ).pipe(distinctUntilChanged(shallowObjectEquals)),
+    ).pipe(
+      distinctUntilChanged(
+        (a, b) =>
+          arrayShallowEquals(a.spotlight, b.spotlight) && a.pip === b.pip,
+      ),
+    ),
   );
 
   const spotlight$ = scope.behavior<MediaViewModel[]>(
     spotlightAndPip$.pipe(
       map(({ spotlight }) => spotlight),
-      distinctUntilChanged<MediaViewModel[]>(shallowArrayEquals),
+      distinctUntilChanged<MediaViewModel[]>(arrayShallowEquals),
     ),
   );
 
@@ -1299,7 +1116,7 @@ export function createCallViewModel$(
           desktop: platform === "desktop",
         }),
       ),
-      distinctUntilChanged(shallowObjectEquals<LayoutMedia>),
+      distinctUntilChanged(layoutShallowEquals),
     ),
   );
 
@@ -1347,7 +1164,7 @@ export function createCallViewModel$(
                   // without a name tag!)
                   // TODO: Only hide name tags in DMs, not group chats that just
                   // happen to have only 2 users
-                  members.size > 2,
+                  members.length > 2,
               ),
             )
           : of(true),
@@ -1494,32 +1311,28 @@ export function createCallViewModel$(
   );
 
   /**
-   * The alignment of the floating spotlight tile, if present.
+   * State of the floating spotlight tile, if present.
    */
-  const spotlightAlignment$ = new BehaviorSubject<Alignment>({
+  const floatingSpotlightTile = createFloatingTile(scope, {
     inline: "end",
     block: "end",
   });
   /**
-   * The size of the small picture-in-picture tile, if present, when in portrait.
+   * State of the small picture-in-picture tile, if present, when in landscape.
    */
-  const portraitPipSize$ = scope.behavior(
-    showFooter$.pipe(map((showFooter) => (showFooter ? "lg" : "sm"))),
-  );
-  /**
-   * The alignment of the small picture-in-picture tile, if present, when in portrait.
-   */
-  const portraitPipAlignment$ = new BehaviorSubject<Alignment>({
-    inline: "end",
-    block: "end",
-  });
-  /**
-   * The alignment of the small picture-in-picture tile, if present, when in landscape.
-   */
-  const landscapePipAlignment$ = new BehaviorSubject<Alignment>({
+  const landscapePipTile = createFloatingTile(scope, {
     inline: "end",
     block: "start",
   });
+  /**
+   * State of the small picture-in-picture tile, if present, when in portrait.
+   */
+  const portraitPipTile = {
+    ...createFloatingTile(scope, { inline: "end", block: "end" }),
+    size$: scope.behavior(
+      showFooter$.pipe(map((showFooter) => (showFooter ? "lg" : "sm"))),
+    ),
+  };
 
   // There is a cyclical dependency here: the layout algorithms want to know
   // which tiles are on screen, but to know which tiles are on screen we have to
@@ -1549,7 +1362,7 @@ export function createCallViewModel$(
             case "spotlight-portrait":
               [layout, newTiles] = gridLikeLayout(
                 media,
-                spotlightAlignment$,
+                floatingSpotlightTile,
                 visibleTiles,
                 setVisibleTiles,
                 prevTiles,
@@ -1559,26 +1372,25 @@ export function createCallViewModel$(
             case "spotlight-expanded":
               [layout, newTiles] = spotlightExpandedLayout(
                 media,
-                landscapePipAlignment$,
+                landscapePipTile,
                 prevTiles,
               );
               break;
             case "one-on-one-desktop":
               [layout, newTiles] = oneOnOneDesktopLayout(
                 media,
-                landscapePipAlignment$,
+                landscapePipTile,
                 prevTiles,
               );
-              pip = layout.pip;
+              pip = layout.pip.vm;
               break;
             case "one-on-one-mobile":
               [layout, newTiles] = oneOnOneMobileLayout(
                 media,
-                portraitPipSize$,
-                portraitPipAlignment$,
+                portraitPipTile,
                 prevTiles,
               );
-              pip = layout.pip;
+              pip = layout.pip?.vm;
               break;
             case "pip":
               [layout, newTiles] = pipLayout(media, prevTiles);
@@ -1603,7 +1415,7 @@ export function createCallViewModel$(
     layoutInternals$.pipe(
       map(({ layout }) => layout),
       // Drop redundant layout updates before they would hit React.
-      distinctUntilChanged(shallowObjectEquals<Layout>),
+      distinctUntilChanged(layoutShallowEquals),
     ),
   );
 
@@ -1735,48 +1547,75 @@ export function createCallViewModel$(
   );
 
   /**
-   * Whether we are sharing our screen.
+   * Whether we are sharing our screen: one of our tracks is a screen share.
    */
-  // reassigned here to make it publicly accessible
-  const sharingScreen$ = localMembership.sharingScreen$;
-
-  /**
-   * Callback to toggle screen sharing. If null, screen sharing is not possible.
-   */
-  // reassigned here to make it publicly accessible
-  const toggleScreenSharing =
-    options.toggleScreensharing ?? localMembership.toggleScreenSharing;
-
-  const errors$ = scope.behavior<{
-    transportError?: ElementCallError;
-    matrixError?: ElementCallError;
-    connectionError?: ElementCallError;
-    publishError?: ElementCallError;
-  } | null>(
-    localMembership.localMemberState$.pipe(
-      map((value) => {
-        const returnObject: {
-          transportError?: ElementCallError;
-          matrixError?: ElementCallError;
-          connectionError?: ElementCallError;
-          publishError?: ElementCallError;
-        } = {};
-        if (value instanceof ElementCallError) return { transportError: value };
-        if (value === TransportState.Waiting) return null;
-        if (value.matrix instanceof ElementCallError)
-          returnObject.matrixError = value.matrix;
-        if (value.media instanceof ElementCallError)
-          returnObject.publishError = value.media;
-        else if (
-          typeof value.media === "object" &&
-          value.media.connection.state === "error"
-        )
-          returnObject.connectionError = value.media.connection.error;
-        return returnObject;
-      }),
-    ),
-    null,
+  const sharingScreen$ = scope.behavior(
+    screenShare$.pipe(map((track) => track !== undefined)),
   );
+
+  const screenShareError$ = new BehaviorSubject<Error | null>(null);
+  /**
+   * Callback to toggle screen sharing. If null, screen sharing is not possible:
+   * the platform cannot capture a screen, or the host hides the button.
+   */
+  const toggleScreenSharing =
+    options.toggleScreensharing ??
+    (hideScreensharing || !("getDisplayMedia" in (navigator.mediaDevices ?? {}))
+      ? null
+      : (): void => {
+          const track = screenShare$.value;
+          (track === undefined
+            ? rtcParticipation.publish({
+                source: "screenShare",
+                capture: capture.screenShare,
+              })
+            : rtcParticipation.unpublish("screenShare")
+          ).catch((e: unknown) => {
+            logger.error(
+              `Screen share ${track === undefined ? "start" : "stop"} failed`,
+              e,
+            );
+            // The user closing the picker is not an error worth showing
+            if (isPermissionDenied(e)) return;
+            screenShareError$.next(
+              e instanceof Error ? e : new Error(String(e)),
+            );
+          });
+        });
+
+  // Tell the host and the analytics about the user's joins and leaves. The
+  // participation is joined by the time the view model is built on it
+  PosthogAnalytics.instance.eventCallEnded.cacheStartCall(new Date());
+  PosthogAnalytics.instance.eventCallStarted.track(matrixRoom.roomId);
+  hostBridge.notifyJoined().catch((e) => {
+    logger.error("Failed to notify the host that we joined", e);
+  });
+  function leave(): void {
+    if (left) return;
+    left = true;
+    stopTermination();
+    rtcParticipation.leave();
+    hostBridge.notifyHungUp().catch((e) => {
+      logger.error("Failed to notify the host that we hung up", e);
+    });
+  }
+
+  let reconnectStart: { time: number; reason: DisconnectReason } | null = null;
+  rtcParticipation.state$.pipe(scope.bind()).subscribe((state) => {
+    if (state.kind === "reconnecting") {
+      reconnectStart ??= { time: Date.now(), reason: state.reason };
+    } else if (state.kind === "connected" && reconnectStart !== null) {
+      const reason =
+        reconnectStart.reason === "media" ? "livekit" : reconnectStart.reason;
+      PosthogAnalytics.instance.eventCallReconnecting.track(
+        matrixRoom.roomId,
+        reason,
+        (Date.now() - reconnectStart.time) / 1000,
+      );
+      PosthogAnalytics.instance.eventCallEnded.cacheReconnecting(reason);
+      reconnectStart = null;
+    }
+  });
 
   return {
     autoLeave$: autoLeave$,
@@ -1786,8 +1625,7 @@ export function createCallViewModel$(
     hangup: (): void => userHangup$.next(),
     terminateCall,
     terminationState$,
-    join: localMembership.requestJoinAndPublish,
-    leave: localMembership.requestDisconnect,
+    leave,
     toggleScreenSharing: toggleScreenSharing,
     sharingScreen$: sharingScreen$,
 
@@ -1797,23 +1635,17 @@ export function createCallViewModel$(
     unhoverScreen: (): void => screenUnhover$.next(),
 
     fatalError$: scope.behavior(
-      errors$.pipe(
-        map((errors) => {
-          logger.debug("errors$ to compute any fatal errors:", errors);
-          return (
-            errors?.transportError ??
-            errors?.matrixError ??
-            errors?.connectionError ??
-            null
-          );
-        }),
-        filter((error) => error !== null),
+      rtcParticipation.state$.pipe(
+        map((state) =>
+          state.kind === "failed" ? fromMatrixRTCError(state.error) : null,
+        ),
       ),
-      null,
     ),
-    allConnections$,
     participantCount$: participantCount$,
     keyRotationSuppressed$: keyRotationSuppressed$,
+    localMember$: rtcParticipation.localMember$,
+    remoteMembers$: rtcParticipation.remoteMembers$,
+    connectedTransports$: rtcParticipation.connectedTransports$,
     handsRaised$: handsRaised$,
     reactions$: reactions$,
     joinSoundEffect$: joinSoundEffect$,
@@ -1829,23 +1661,6 @@ export function createCallViewModel$(
       showLayoutSwitch$.pipe(map((show) => (show ? layoutSwitchVm : null))),
     ),
     layout$: layout$,
-    localMatrixLivekitMember$,
-    remoteMatrixLivekitMembers$: scope.behavior(
-      remoteMatrixLivekitMembers$.pipe(
-        map((members) => members.value),
-        tap((v) => {
-          const listForLogs = v
-            .map(
-              (m) =>
-                m.membership$.value.userId + "|" + m.membership$.value.deviceId,
-            )
-            .join(",");
-          logger.debug(
-            `matrixLivekitMembers$ updated (exported) [${listForLogs}]`,
-          );
-        }),
-      ),
-    ),
     tileStoreGeneration$: tileStoreGeneration$,
     showSpotlightIndicators$: showSpotlightIndicators$,
     showSpeakingIndicators$: showSpeakingIndicators$,
@@ -1861,30 +1676,21 @@ export function createCallViewModel$(
     overflowing$,
     earpieceMode$: earpieceMode$,
     audioOutputSwitcher$: audioOutputSwitcher$,
-    reconnecting$: localMembership.reconnecting$,
-    livekitRoomItems$,
-    connected$: localMembership.connected$,
-    screenShareError$: localMembership.screenShareError$,
-    dismissScreenShareError: localMembership.dismissScreenShareError,
+    reconnecting$,
+    screenShareError$,
+    dismissScreenShareError: (): void => screenShareError$.next(null),
   };
 }
 
-function getE2eeKeyProvider(
-  e2eeSystem: EncryptionSystem,
-  rtcSession: MatrixRTCSession,
-  logger: Logger,
-): BaseKeyProvider | undefined {
-  if (e2eeSystem.kind === E2eeType.NONE) return undefined;
+/** Whether an error, or the browser error the SDK wrapped, is the user saying no. */
+function isPermissionDenied(e: unknown): boolean {
+  const cause = e instanceof Error && e.cause !== undefined ? e.cause : e;
+  return cause instanceof DOMException && cause.name === "NotAllowedError";
+}
 
-  if (e2eeSystem.kind === E2eeType.PER_PARTICIPANT) {
-    const keyProvider = new MatrixKeyProvider();
-    keyProvider.setRTCSession(rtcSession);
-    return keyProvider;
-  } else if (e2eeSystem.kind === E2eeType.SHARED_KEY && e2eeSystem.secret) {
-    const keyProvider = new ExternalE2EEKeyProvider();
-    keyProvider
-      .setKey(e2eeSystem.secret)
-      .catch((e) => logger.error("Failed to set shared key for E2EE", e));
-    return keyProvider;
-  }
+/** The members a call can be with: those in the room and those invited. */
+function roomMembers(room: MatrixRoom): RoomMember[] {
+  return room
+    .getMembersWithMembership(KnownMembership.Join)
+    .concat(room.getMembersWithMembership(KnownMembership.Invite));
 }

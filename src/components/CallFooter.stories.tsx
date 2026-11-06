@@ -6,7 +6,7 @@ Please see LICENSE in the repository root for full details.
 */
 
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
-import { BehaviorSubject } from "rxjs";
+import { BehaviorSubject, NEVER } from "rxjs";
 import { type JSX, type ReactNode, useMemo, useState } from "react";
 import { animated } from "@react-spring/web";
 import useMeasure from "react-use-measure";
@@ -27,7 +27,7 @@ import { type LayoutMode } from "../state/LayoutSwitchViewModel";
 import { RootElementProvider } from "../RootElementContext";
 import { Grid, type TileProps } from "../grid/Grid";
 import { makeGridLayout } from "../grid/GridLayout";
-import { type Alignment, type GridLayout } from "../state/layout-types";
+import { type GridLayout } from "../state/layout-types";
 import { GridTileViewModel, type TileViewModel } from "../state/TileViewModel";
 import { createBaseUserMedia } from "../state/media/UserMediaViewModel";
 import { E2eeType } from "../e2ee/e2eeType";
@@ -708,14 +708,16 @@ function ParticipantGrid({
                 userId: `@participant${i}:example.org`,
                 displayName$: constant(`Participant ${i + 1}`),
                 mxcAvatarUrl$: constant(undefined),
-                participant$: constant(null),
-                livekitRoom$: constant(undefined),
+                member: {
+                  local: true,
+                  tracks$: constant(null),
+                  encryptionError$: NEVER,
+                },
                 transport$: constant(undefined),
                 encryptionSystem: { kind: E2eeType.NONE },
                 rtcBackendIdentity: String(i),
                 handRaised$: constant(null),
                 reaction$: constant(null),
-                statsType: "outbound-rtp",
               }),
               local: true as const,
               mirror$: constant(false),
@@ -725,10 +727,6 @@ function ParticipantGrid({
             }),
           ),
       ),
-      spotlightAlignment$: new BehaviorSubject<Alignment>({
-        block: "end",
-        inline: "end",
-      }),
       setVisibleTiles: fn(),
     }),
     [],

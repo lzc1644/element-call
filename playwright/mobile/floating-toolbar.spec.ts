@@ -40,7 +40,7 @@ for (const device of ["Pixel 7", "iPhone 13"] as const) {
           }
           const call = viewerPage.locator('[data-layout="spotlight-portrait"]');
           await expect(
-            viewerPage.locator('video[data-lk-source="screen_share"]'),
+            viewerPage.locator('video[data-source="screenShare"]'),
           ).toHaveCount(0);
           await expect(call).toBeVisible({ timeout: 30_000 });
           const grid = call.locator('[data-scrollable="true"]');

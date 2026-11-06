@@ -47,10 +47,12 @@ modePairs.forEach(([rtcMode1, rtcMode2]) => {
       );
 
       await TestHelpers.startCallInCurrentRoom(florian.page, false);
+      await TestHelpers.approveWidgetPermissions(florian.page);
       await TestHelpers.joinCallFromLobby(florian.page);
 
       // timo joins
       await TestHelpers.joinCallInCurrentRoom(timo.page);
+      await TestHelpers.approveWidgetPermissions(timo.page);
 
       // We should see 2 video tiles everywhere now
       for (const user of [timo, florian]) {

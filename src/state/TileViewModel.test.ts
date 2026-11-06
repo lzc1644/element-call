@@ -13,7 +13,6 @@ import { constant } from "./Behavior";
 import { type MediaViewModel } from "./media/MediaViewModel";
 import {
   mockRemoteScreenShare,
-  mockRemoteParticipant,
   mockRtcMembership,
   testScope,
 } from "../utils/test";
@@ -54,9 +53,5 @@ it("does not select the last share for a stale observer ID", () => {
 });
 
 function share(userId: string): MediaViewModel {
-  return mockRemoteScreenShare(
-    mockRtcMembership(userId, "DEVICE"),
-    {},
-    mockRemoteParticipant({ identity: userId }),
-  );
+  return mockRemoteScreenShare(mockRtcMembership(userId, "DEVICE"), {}, []);
 }
