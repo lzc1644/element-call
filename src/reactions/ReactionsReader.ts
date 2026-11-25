@@ -30,7 +30,10 @@ import {
   type ReactionInfo,
 } from ".";
 import { type ObservableScope } from "../state/ObservableScope";
-import { isCallTerminationEvent } from "../callTermination";
+import {
+  isCallModerationEvent,
+  isCallTerminationEvent,
+} from "../callTermination";
 
 export const REACTION_ACTIVE_TIME_MS = 3000;
 
@@ -253,7 +256,7 @@ export class ReactionsReader {
       .catch((e) => logger.warn(`Failed to decrypt ${event.getId()}`, e));
     if (event.isBeingDecrypted() || event.isDecryptionFailure()) return;
     // Control envelopes on the call-event transport are not emoji reactions.
-    if (isCallTerminationEvent(event)) return;
+    if (isCallTerminationEvent(event) || isCallModerationEvent(event)) return;
 
     if (event.getType() === ElementCallReactionEventType) {
       const content: ECallReactionEventContent = event.getContent();

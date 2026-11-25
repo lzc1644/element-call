@@ -15,6 +15,7 @@ import {
 } from "@element-hq/matrixrtc-sdk";
 import { combineLatest, distinctUntilChanged, map, of } from "rxjs";
 
+import { callControlMember } from "../../callTermination/CallModeration";
 import { observeSpeaker$ } from "./observeSpeaker.ts";
 import { type UserMediaViewModel } from "./UserMediaViewModel.ts";
 import { type ScreenShareViewModel } from "./ScreenShareViewModel.ts";
@@ -99,6 +100,13 @@ export function createWrappedUserMedia(
         member,
         pretendToBeDisconnected$,
         ...inputs,
+        callControlTarget: () =>
+          callControlMember(
+            member.userId,
+            member.deviceId,
+            member.memberId,
+            member.membershipEvent$.value.createdTs,
+          ),
       });
 
   const screenShares$ = scope.behavior(

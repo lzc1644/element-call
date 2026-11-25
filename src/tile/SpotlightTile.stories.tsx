@@ -17,6 +17,8 @@ import { SpotlightTileViewModel } from "../state/TileViewModel";
 import { constant } from "../state/Behavior";
 import { createVolumeControls } from "../state/VolumeControls";
 import { type RemoteScreenShareViewModel } from "../state/media/RemoteScreenShareViewModel";
+import { type RemoteUserMediaViewModel } from "../state/media/RemoteUserMediaViewModel";
+import { type CallModerationProps } from "./useCallModeration";
 import { EncryptionStatus } from "../state/media/MemberMediaViewModel";
 
 function SpotlightStory({
@@ -24,17 +26,24 @@ function SpotlightStory({
   expanded,
   onToggleExpanded,
   multipleScreenShares,
-}: {
+  participantControls,
+  onModerate,
+}: CallModerationProps & {
   audio: boolean;
   expanded: boolean;
   onToggleExpanded: () => void;
   multipleScreenShares: boolean;
+  participantControls: boolean;
 }): ReactNode {
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
   const [vm, setVm] = useState<SpotlightTileViewModel | null>(null);
   useEffect(() => {
     const scope = new ObservableScope();
-    const media = [remoteShare(scope, "alice", audio)];
+    const media: (RemoteScreenShareViewModel | RemoteUserMediaViewModel)[] = [
+      participantControls
+        ? remoteParticipant(scope)
+        : remoteShare(scope, "alice", audio),
+    ];
     if (multipleScreenShares) media.push(remoteShare(scope, "bob", audio));
     setVm(
       new SpotlightTileViewModel(
@@ -45,7 +54,7 @@ function SpotlightStory({
       ),
     );
     return (): void => scope.end();
-  }, [audio, multipleScreenShares]);
+  }, [audio, multipleScreenShares, participantControls]);
   return (
     <div
       ref={setRoot}
@@ -61,6 +70,7 @@ function SpotlightStory({
         {vm && (
           <SpotlightTile
             vm={vm}
+            onModerate={participantControls ? onModerate : undefined}
             expanded={expanded}
             onToggleExpanded={onToggleExpanded}
             onToggleFullscreen={fn()}
@@ -86,6 +96,8 @@ const meta = {
     expanded: false,
     onToggleExpanded: fn(),
     multipleScreenShares: false,
+    participantControls: false,
+    onModerate: fn(),
   },
 } satisfies Meta<typeof SpotlightStory>;
 export default meta;
@@ -189,6 +201,83 @@ export const MultipleScreenShares: Story = {
     await expect(bobShare).toHaveAttribute("aria-hidden", "true");
   },
 };
+
+export const ParticipantControls: Story = {
+  args: { participantControls: true },
+  globals: { viewport: { value: "mobile2" } },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const portals = within(canvasElement.ownerDocument.body);
+    await userEvent.click(
+      await canvas.findByRole("button", { name: "Options" }),
+    );
+    await userEvent.click(
+      await portals.findByRole("menuitem", { name: "Turn off microphone" }),
+    );
+    await expect(args.onModerate).toHaveBeenCalledWith(
+      {
+        user_id: "@Alice:example.org",
+        member_id: "alice-generation",
+        joined_ts: null,
+      },
+      "mute",
+    );
+
+    await userEvent.click(canvas.getByRole("button", { name: "Options" }));
+    await userEvent.click(
+      await portals.findByRole("menuitem", { name: "Remove from call" }),
+    );
+    const dialog = await portals.findByRole("dialog", {
+      name: "Remove Alice from this call?",
+    });
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Cancel" }),
+    );
+    await expect(args.onModerate).toHaveBeenCalledTimes(1);
+
+    await userEvent.click(canvas.getByRole("button", { name: "Options" }));
+    await userEvent.click(
+      await portals.findByRole("menuitem", { name: "Remove from call" }),
+    );
+    const confirm = await portals.findByRole("dialog", {
+      name: "Remove Alice from this call?",
+    });
+    await userEvent.click(
+      within(confirm).getByRole("button", { name: "Remove from call" }),
+    );
+    await expect(args.onModerate).toHaveBeenLastCalledWith(
+      {
+        user_id: "@Alice:example.org",
+        member_id: "alice-generation",
+        joined_ts: null,
+      },
+      "remove",
+    );
+  },
+};
+
+function remoteParticipant(scope: ObservableScope): RemoteUserMediaViewModel {
+  return {
+    ...remoteShare(scope, "Alice", true),
+    id: "alice-user",
+    type: "user",
+    callControlTarget: () => ({
+      user_id: "@Alice:example.org",
+      member_id: "alice-generation",
+      joined_ts: null,
+    }),
+    waitingForMedia$: constant(false),
+    speaking$: constant(false),
+    videoOrientation$: constant("landscape"),
+    toggleCropVideo: () => {},
+    rtcBackendIdentity: "alice",
+    handRaised$: constant(null),
+    reaction$: constant(null),
+    audioStreamStats$: constant(undefined),
+    videoStreamStats$: constant(undefined),
+    setVideoAspectRatio: () => {},
+  };
+}
 
 function remoteShare(
   scope: ObservableScope,

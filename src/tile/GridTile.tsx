@@ -39,6 +39,10 @@ import {
 } from "@vector-im/compound-web";
 
 import styles from "./GridTile.module.css";
+import {
+  useCallModeration,
+  type CallModerationProps,
+} from "./useCallModeration";
 import { Slider } from "../Slider";
 import { MediaView } from "./MediaView";
 import { useLatest } from "../useLatest";
@@ -343,7 +347,7 @@ const LocalUserMediaTile: FC<LocalUserMediaTileProps> = ({
 
 LocalUserMediaTile.displayName = "LocalUserMediaTile";
 
-interface RemoteUserMediaTileProps extends TileProps {
+interface RemoteUserMediaTileProps extends TileProps, CallModerationProps {
   vm: RemoteUserMediaViewModel;
   showSpeakingIndicators: boolean;
 }
@@ -351,6 +355,8 @@ interface RemoteUserMediaTileProps extends TileProps {
 const RemoteUserMediaTile: FC<RemoteUserMediaTileProps> = ({
   ref,
   vm,
+  onModerate,
+  moderationPending,
   ...props
 }) => {
   const { t } = useTranslation();
@@ -367,47 +373,58 @@ const RemoteUserMediaTile: FC<RemoteUserMediaTileProps> = ({
     [vm],
   );
 
+  const { items, confirmation } = useCallModeration(
+    vm,
+    props.displayName,
+    onModerate,
+    moderationPending,
+  );
+
   const VolumeIcon = playbackMuted ? VolumeOffIcon : VolumeOnIcon;
 
   return (
-    <UserMediaTile
-      ref={ref}
-      vm={vm}
-      waitingForMedia={waitingForMedia}
-      playbackMuted={playbackMuted}
-      mirror={false}
-      menuStart={
-        <>
-          <ToggleMenuItem
-            Icon={MicOffIcon}
-            label={t("video_tile.mute_for_me")}
-            checked={playbackMuted}
-            onSelect={onSelectMute}
-          />
-          {/* TODO: Figure out how to make this slider keyboard accessible */}
-          <MenuItem as="div" Icon={VolumeIcon} label={null} onSelect={null}>
-            <Slider
-              className={styles.volumeSlider}
-              label={t("video_tile.volume")}
-              value={playbackVolume}
-              onValueChange={vm.adjustPlaybackVolume}
-              onValueCommit={vm.commitPlaybackVolume}
-              min={0}
-              max={1}
-              step={0.01}
+    <>
+      <UserMediaTile
+        ref={ref}
+        vm={vm}
+        waitingForMedia={waitingForMedia}
+        playbackMuted={playbackMuted}
+        mirror={false}
+        menuStart={
+          <>
+            <ToggleMenuItem
+              Icon={MicOffIcon}
+              label={t("video_tile.mute_for_me")}
+              checked={playbackMuted}
+              onSelect={onSelectMute}
             />
-          </MenuItem>
-        </>
-      }
-      transport={transport}
-      {...props}
-    />
+            {/* TODO: Figure out how to make this slider keyboard accessible */}
+            <MenuItem as="div" Icon={VolumeIcon} label={null} onSelect={null}>
+              <Slider
+                className={styles.volumeSlider}
+                label={t("video_tile.volume")}
+                value={playbackVolume}
+                onValueChange={vm.adjustPlaybackVolume}
+                onValueCommit={vm.commitPlaybackVolume}
+                min={0}
+                max={1}
+                step={0.01}
+              />
+            </MenuItem>
+            {items}
+          </>
+        }
+        transport={transport}
+        {...props}
+      />
+      {confirmation}
+    </>
   );
 };
 
 RemoteUserMediaTile.displayName = "RemoteUserMediaTile";
 
-interface GridTileProps {
+interface GridTileProps extends CallModerationProps {
   ref?: Ref<HTMLDivElement>;
   vm: GridTileViewModel;
   onOpenProfile: (() => void) | null;
@@ -430,6 +447,8 @@ export const GridTile: FC<GridTileProps> = ({
   showOutline,
   onOpenProfile,
   className,
+  onModerate,
+  moderationPending,
   ...props
 }) => {
   const ourRef = useRef<HTMLDivElement | null>(null);
@@ -467,6 +486,8 @@ export const GridTile: FC<GridTileProps> = ({
     return (
       <RemoteUserMediaTile
         ref={ref}
+        onModerate={onModerate}
+        moderationPending={moderationPending}
         vm={media}
         showSpeakingIndicators={showSpeakingIndicators}
         displayName={displayName}

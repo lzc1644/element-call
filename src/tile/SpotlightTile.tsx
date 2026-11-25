@@ -9,15 +9,18 @@ Please see LICENSE in the repository root for full details.
 import {
   type ComponentProps,
   type FC,
+  type ReactNode,
   type Ref,
   type RefAttributes,
   useCallback,
   useEffect,
   useRef,
+  useState,
   useMemo,
 } from "react";
 import {
   ExpandIcon,
+  OverflowHorizontalIcon,
   CollapseIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -37,12 +40,16 @@ import {
 import { useTranslation } from "react-i18next";
 import classNames from "classnames";
 import { type VideoMediaTrack } from "@element-hq/matrixrtc-sdk";
-import { MenuItem, MenuTitle, Text } from "@vector-im/compound-web";
+import { Menu, MenuItem, MenuTitle, Text } from "@vector-im/compound-web";
 import { Root, Trigger, Portal, Content, Title } from "@radix-ui/react-dialog";
 import useMeasure from "react-use-measure";
 
 import FullScreenMaximiseIcon from "../icons/FullScreenMaximise.svg?react";
 import FullScreenMinimiseIcon from "../icons/FullScreenMinimise.svg?react";
+import {
+  useCallModeration,
+  type CallModerationProps,
+} from "./useCallModeration";
 import { MediaView } from "./MediaView";
 import styles from "./SpotlightTile.module.css";
 import { useInitial } from "../useInitial";
@@ -324,6 +331,50 @@ const SpotlightItem: FC<SpotlightItemProps> = ({
 
 SpotlightItem.displayName = "SpotlightItem";
 
+interface SpotlightModerationButtonProps extends CallModerationProps {
+  vm: RemoteUserMediaViewModel;
+  focusable: boolean;
+}
+
+function SpotlightModerationButton({
+  vm,
+  focusable,
+  onModerate,
+  moderationPending,
+}: SpotlightModerationButtonProps): ReactNode {
+  const { t } = useTranslation();
+  const name = useBehavior(vm.displayName$);
+  const [open, setOpen] = useState(false);
+  const { items, confirmation } = useCallModeration(
+    vm,
+    name,
+    onModerate,
+    moderationPending,
+  );
+  if (!items) return null;
+  return (
+    <>
+      <Menu
+        open={open}
+        onOpenChange={setOpen}
+        title={name}
+        trigger={
+          <button
+            className={styles.expand}
+            aria-label={t("common.options")}
+            tabIndex={focusable ? undefined : -1}
+          >
+            <OverflowHorizontalIcon aria-hidden width={20} height={20} />
+          </button>
+        }
+      >
+        {items}
+      </Menu>
+      {confirmation}
+    </>
+  );
+}
+
 interface ScreenShareVolumeButtonProps {
   vm: RemoteScreenShareViewModel;
   focusable: boolean;
@@ -441,7 +492,7 @@ const ScreenShareVolumeButton: FC<ScreenShareVolumeButtonProps> = ({
   );
 };
 
-interface Props {
+interface Props extends CallModerationProps {
   ref?: Ref<HTMLDivElement>;
   vm: SpotlightTileViewModel;
   expanded: boolean;
@@ -470,6 +521,8 @@ export const SpotlightTile: FC<Props> = ({
   expanded,
   onToggleExpanded,
   showTileControls = true,
+  onModerate,
+  moderationPending,
   fullscreen = false,
   onToggleFullscreen,
   targetWidth,
@@ -607,6 +660,15 @@ export const SpotlightTile: FC<Props> = ({
 
       {showTileControls && (
         <div className={styles.controls}>
+          {visibleMedia?.type === "user" && !visibleMedia.local && (
+            <SpotlightModerationButton
+              key={visibleMedia.id}
+              vm={visibleMedia}
+              focusable={focusable}
+              onModerate={onModerate}
+              moderationPending={moderationPending}
+            />
+          )}
           {visibleMedia?.type === "screen share" && !visibleMedia.local && (
             <ScreenShareVolumeButton
               key={visibleMedia.id}

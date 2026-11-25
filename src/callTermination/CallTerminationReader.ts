@@ -24,9 +24,11 @@ import { combineLatest, map, Observable, of, Subject, switchMap } from "rxjs";
 
 import {
   isCallTerminationEvent,
+  isCallModerationEvent,
   parseCallTerminationEvent,
   type TerminationEvent,
 } from ".";
+import { CALL_CONTROL_KEY } from "./CallModeration";
 import { type ObservableScope } from "../state/ObservableScope";
 
 /**
@@ -78,6 +80,12 @@ interface TerminationMembership {
  */
 export class CallTerminationReader {
   private readonly terminationSubject$ = new Subject<TerminationEvent>();
+  private readonly moderationSubject$ = new Subject<{
+    content: unknown;
+    sender: string;
+    timestamp: number;
+  }>();
+  public readonly moderation$ = this.moderationSubject$.asObservable();
   private readonly emittedEventIds = new Set<string>();
   private readonly liveEventIds = new Set<string>();
   private readonly observedMemberships = new Map<string, ObservedMembership>();
@@ -190,7 +198,11 @@ export class CallTerminationReader {
     const eventId = event.getId();
     if (!eventId) return;
 
-    if (isCallTerminationEvent(event) || event.isEncrypted()) {
+    if (
+      isCallTerminationEvent(event) ||
+      isCallModerationEvent(event) ||
+      event.isEncrypted()
+    ) {
       this.rememberLiveEvent(eventId);
       this.handleTerminationEvent(event);
     }
@@ -220,6 +232,19 @@ export class CallTerminationReader {
     // Skip events without sender or ID, or events already admitted.
     if (!sender || !eventId) return;
     if (this.emittedEventIds.has(eventId)) return;
+
+    if (isCallModerationEvent(event) && !isCallTerminationEvent(event)) {
+      if (event.isBeingDecrypted() || event.isDecryptionFailure()) return;
+      this.liveEventIds.delete(eventId);
+      if (event.isState() || event.isRedacted()) return;
+      this.rememberEmittedEvent(eventId);
+      this.moderationSubject$.next({
+        content: event.getContent()[CALL_CONTROL_KEY],
+        sender,
+        timestamp: event.getTs(),
+      });
+      return;
+    }
 
     if (!isCallTerminationEvent(event)) {
       // An encrypted event has no usable type/content until it is decrypted.

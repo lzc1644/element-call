@@ -33,6 +33,11 @@ import {
   isCallTerminationEvent,
   parseCallTerminationEvent,
 } from ".";
+import {
+  CALL_CONTROL_KEY,
+  callControlMember,
+  createCallModeration,
+} from "./CallModeration";
 import { CallTerminationReader } from "./CallTerminationReader";
 import {
   localRtcMember,
@@ -41,7 +46,7 @@ import {
   alice,
   local,
 } from "../utils/test-fixtures";
-import { MockRTCSession, testScope } from "../utils/test";
+import { MockRTCSession, mockRtcMembership, testScope } from "../utils/test";
 import { getBasicRTCSession } from "../utils/test-viewmodel";
 import { ReactionsReader } from "../reactions/ReactionsReader";
 
@@ -154,6 +159,117 @@ test.each([aliceRtcMember.userId, localRtcMember.userId])(
     expect(onReaction).toHaveBeenCalledExactlyOnceWith({});
   },
 );
+
+test("directed controls use no new widget capability and do not look like termination or a reaction", async () => {
+  const { client, room, receive, sentEvents } =
+    await createNativeWidgetClient();
+  const localMembership = mockRtcMembership(
+    localRtcMemberDevice2.userId,
+    localRtcMemberDevice2.deviceId,
+    { membership: { created_ts: 1_000 } },
+  );
+  const remoteMembership = mockRtcMembership(
+    aliceRtcMember.userId,
+    aliceRtcMember.deviceId,
+    { membership: { created_ts: 2_000 } },
+  );
+  const rtcSession = new MockRTCSession(room, [
+    localMembership,
+    remoteMembership,
+  ]);
+  const scope = testScope();
+  const reader = new CallTerminationReader(
+    scope,
+    rtcSession.asMockedSession(),
+    client,
+  );
+  const reactions = new ReactionsReader(scope, rtcSession.asMockedSession());
+  const termination = vi.fn();
+  const reaction = vi.fn();
+  reader.termination$.subscribe(termination);
+  reactions.reactions$.subscribe(reaction);
+
+  const localDevice = callControlMember(
+    localMembership.userId,
+    localMembership.deviceId,
+    localMembership.memberId,
+    localMembership.createdTs(),
+  );
+  const remoteDevice = callControlMember(
+    remoteMembership.userId,
+    remoteMembership.deviceId,
+    remoteMembership.memberId,
+    remoteMembership.createdTs(),
+  );
+  const mute = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
+  const remove = vi.fn();
+  const controls = createCallModeration({
+    local: () => localDevice,
+    members: () => [localDevice, remoteDevice],
+    send: async (content) =>
+      await client.sendEvent(room.roomId, CallTerminationEventType, content),
+    mute,
+    remove,
+  });
+  scope.onEnd(() => controls.dispose());
+  reader.moderation$.subscribe(({ content, sender, timestamp }) => {
+    void controls.receive(content, sender, timestamp);
+  });
+  const envelope = {
+    room_id: room.roomId,
+    event_id: "$web-mute:example.org",
+    origin_server_ts: Date.now(),
+    sender: remoteDevice.user_id,
+    type: CallTerminationEventType,
+    content: {
+      [CALL_CONTROL_KEY]: {
+        id: "directed-control",
+        kind: "request",
+        from: remoteDevice,
+        to: localDevice,
+        action: "mute",
+      },
+    },
+  };
+  expect(await receive(envelope)).toBe(true);
+  await vi.waitFor(() => expect(sentEvents).toHaveLength(1));
+  expect(mute).toHaveBeenCalledOnce();
+  expect(remove).not.toHaveBeenCalled();
+  expect(sentEvents[0]).toMatchObject({
+    type: CallTerminationEventType,
+    content: {
+      [CALL_CONTROL_KEY]: {
+        id: "directed-control",
+        kind: "response",
+        from: localDevice,
+        to: remoteDevice,
+        result: "ok",
+      },
+    },
+  });
+  expect(termination).not.toHaveBeenCalled();
+  expect(reaction).toHaveBeenCalledExactlyOnceWith({});
+
+  const outbound = controls.request(remoteDevice, "remove");
+  await vi.waitFor(() => expect(sentEvents).toHaveLength(2));
+  const content = sentEvents[1].content?.[CALL_CONTROL_KEY] as { id: string };
+  expect(
+    await receive({
+      ...envelope,
+      event_id: "$web-response:example.org",
+      content: {
+        [CALL_CONTROL_KEY]: {
+          id: content.id,
+          kind: "response",
+          from: remoteDevice,
+          to: localDevice,
+          result: "ok",
+        },
+      },
+    }),
+  ).toBe(true);
+  expect(await outbound).toBeNull();
+});
 
 test.each([
   { emoji: "👍", name: "thumbsup" },
