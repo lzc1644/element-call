@@ -37,9 +37,11 @@ import { EventStatus, type MatrixEvent } from "matrix-js-sdk/lib/models/event";
 import { v4 as uuidv4 } from "uuid";
 import {
   BehaviorSubject,
+  EMPTY,
   combineLatest,
   distinctUntilChanged,
   filter,
+  firstValueFrom,
   fromEvent,
   map,
   merge,
@@ -56,6 +58,7 @@ import {
   take,
   tap,
   throttleTime,
+  timeout,
   timer,
   takeUntil,
 } from "rxjs";
@@ -100,6 +103,13 @@ import {
   CallTerminationReader,
   type CallTerminationSource,
 } from "../../callTermination/CallTerminationReader";
+import {
+  callControlMember,
+  createCallModeration,
+  type CallControlMember,
+  type CallModerationAction,
+  type CallModerationErrorCode,
+} from "../../callTermination/CallModeration";
 import {
   layoutShallowEquals,
   type Layout,
@@ -331,6 +341,13 @@ export interface CallViewModel {
    */
   terminateCall: () => Promise<void>;
   terminationState$: Behavior<CallTerminationState>;
+  moderateParticipant: (
+    target: CallControlMember,
+    action: CallModerationAction,
+  ) => void;
+  moderationPending$: Behavior<boolean>;
+  moderationNotice$: Behavior<CallModerationErrorCode | "muted" | null>;
+  dismissModerationNotice: () => void;
 
   /** Leaves the participation. The leave can then be observed via `leave$`. */
   leave: () => void;
@@ -521,11 +538,21 @@ export function createCallViewModel$(
     sentCallNotification$ = of(null),
   } = options;
 
-  const termination$ = (options.createTermination$ ?? createTermination$)(
-    scope,
-    { room: matrixRoom, slot: rtcParticipation.slot },
-    client,
-  );
+  const controlSource = { room: matrixRoom, slot: rtcParticipation.slot };
+  const {
+    termination$,
+    moderation$,
+  }: Pick<CallTerminationReader, "termination$" | "moderation$"> =
+    options.createTermination$
+      ? {
+          termination$: options.createTermination$(
+            scope,
+            controlSource,
+            client,
+          ),
+          moderation$: EMPTY,
+        }
+      : new CallTerminationReader(scope, controlSource, client);
 
   const { capture = {}, videoProcessor$ = constant(undefined) } = options;
   const localTracks$ = scope.behavior<
@@ -809,6 +836,79 @@ export function createCallViewModel$(
   let failedTerminationEvent: MatrixEvent | undefined;
   let stopped = false;
   let left = false;
+  const moderationPending = new BehaviorSubject(false);
+  const moderationNotice = new BehaviorSubject<
+    CallModerationErrorCode | "muted" | null
+  >(null);
+  const controlMembers = (): CallControlMember[] =>
+    rtcParticipation.slot.members$.value.map((member) =>
+      callControlMember(
+        member.userId,
+        member.deviceId,
+        member.memberId,
+        member.membershipEvent$.value.createdTs,
+      ),
+    );
+  const controls = createCallModeration({
+    local: () => {
+      if (left || stopped) return undefined;
+      const own = rtcParticipation.slot.members$.value.find(
+        (member) => member.local,
+      );
+      return (
+        own &&
+        callControlMember(
+          own.userId,
+          own.deviceId,
+          own.memberId,
+          own.membershipEvent$.value.createdTs,
+        )
+      );
+    },
+    members: controlMembers,
+    send: async (content) =>
+      await client.sendEvent(
+        matrixRoom.roomId,
+        CallTerminationEventType,
+        content,
+      ),
+    mute: async () => {
+      const wasEnabled = muteStates.audio.enabled$.value;
+      muteStates.audio.setEnabled$.value?.(false);
+      try {
+        await firstValueFrom(
+          muteStates.audio.enabled$.pipe(
+            filter((enabled) => !enabled),
+            scope.bind(),
+            timeout(8_000),
+          ),
+        );
+      } catch {
+        return false;
+      }
+      if (wasEnabled) moderationNotice.next("muted");
+      return true;
+    },
+    remove: () => userHangup$.next(),
+  });
+  moderation$.pipe(scope.bind()).subscribe(({ content, sender, timestamp }) => {
+    void controls.receive(content, sender, timestamp);
+  });
+
+  function moderateParticipant(
+    target: CallControlMember,
+    action: CallModerationAction,
+  ): void {
+    if (stopped || moderationPending.value) return;
+    moderationPending.next(true);
+    moderationNotice.next(null);
+    void controls.request(target, action).then((error) => {
+      if (stopped) return;
+      moderationNotice.next(error);
+      moderationPending.next(false);
+    });
+  }
+
   scope.onEnd(stopTermination);
 
   const hostHangup$ = hostBridge.hangUp$.pipe(
@@ -869,6 +969,7 @@ export function createCallViewModel$(
 
   function stopTermination(): void {
     stopped = true;
+    controls.dispose();
     cancelFailedTermination();
   }
 
@@ -1625,6 +1726,10 @@ export function createCallViewModel$(
     hangup: (): void => userHangup$.next(),
     terminateCall,
     terminationState$,
+    moderateParticipant,
+    moderationPending$: scope.behavior(moderationPending),
+    moderationNotice$: scope.behavior(moderationNotice),
+    dismissModerationNotice: () => moderationNotice.next(null),
     leave,
     toggleScreenSharing: toggleScreenSharing,
     sharingScreen$: sharingScreen$,

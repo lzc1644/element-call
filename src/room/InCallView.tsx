@@ -541,6 +541,24 @@ export const InCallView: FC<InCallViewProps> = ({
     </Toast>
   );
 
+  const moderationNotice = useBehavior(vm.moderationNotice$);
+  const moderationToast = moderationNotice !== null && (
+    <Toast
+      onDismiss={vm.dismissModerationNotice}
+      open
+      autoDismiss={5000}
+      modal={false}
+    >
+      {moderationNotice === "muted"
+        ? t("video_tile.microphone_closed_by_participant")
+        : moderationNotice === "unavailable"
+          ? t("video_tile.moderation_unavailable")
+          : moderationNotice === "gone"
+            ? t("video_tile.moderation_gone")
+            : t("video_tile.moderation_failed")}
+    </Toast>
+  );
+
   // The reconnecting toast cannot be dismissed
   const onDismissReconnectingToast = useCallback(() => {}, []);
   // We need to use a non-modal toast to avoid trapping focus within the toast.
@@ -590,6 +608,7 @@ export const InCallView: FC<InCallViewProps> = ({
         );
         const showSpeakingIndicators = useBehavior(vm.showSpeakingIndicators$);
         const showNameTags = useBehavior(vm.showNameTags$);
+        const moderationPending = useBehavior(vm.moderationPending$);
         const showRingingStatus = vm.ringingStatusLocation === "tile";
         const showOutline = useBehavior(
           model instanceof GridTileViewModel
@@ -601,6 +620,8 @@ export const InCallView: FC<InCallViewProps> = ({
           <GridTile
             ref={ref}
             vm={model}
+            onModerate={vm.moderateParticipant}
+            moderationPending={moderationPending}
             onOpenProfile={openProfile}
             targetWidth={targetWidth}
             targetHeight={targetHeight}
@@ -616,6 +637,8 @@ export const InCallView: FC<InCallViewProps> = ({
           <SpotlightTile
             ref={ref}
             vm={model}
+            onModerate={vm.moderateParticipant}
+            moderationPending={moderationPending}
             expanded={spotlightExpanded}
             onToggleExpanded={onToggleExpanded}
             fullscreen={fullscreen}
@@ -795,6 +818,7 @@ export const InCallView: FC<InCallViewProps> = ({
       <RingingAudioRenderer vm={ringingVm} muted={muteAllAudio} />
       {reconnectingToast}
       {screenShareToast}
+      {moderationToast}
       {earpieceOverlay}
       <ReactionsOverlay vm={vm} />
       {footer}

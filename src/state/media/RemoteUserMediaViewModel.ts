@@ -6,6 +6,7 @@ SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
 */
 
+import { type CallControlMember } from "../../callTermination/CallModeration";
 import {
   type Behavior,
   type ObservableScope,
@@ -24,6 +25,7 @@ import {
 export interface RemoteUserMediaViewModel
   extends BaseUserMediaViewModel, VolumeControls {
   local: false;
+  callControlTarget?: () => CallControlMember;
   /**
    * Whether we are waiting for this user's media to arrive. This could be
    * because either we or the remote party are still connecting.
@@ -33,11 +35,16 @@ export interface RemoteUserMediaViewModel
 
 export interface RemoteUserMediaInputs extends BaseUserMediaInputs {
   pretendToBeDisconnected$: Behavior<boolean>;
+  callControlTarget?: () => CallControlMember;
 }
 
 export function createRemoteUserMedia(
   scope: ObservableScope,
-  { pretendToBeDisconnected$, ...inputs }: RemoteUserMediaInputs,
+  {
+    pretendToBeDisconnected$,
+    callControlTarget,
+    ...inputs
+  }: RemoteUserMediaInputs,
 ): RemoteUserMediaViewModel {
   const baseUserMedia = createBaseUserMedia(scope, inputs);
 
@@ -65,6 +72,7 @@ export function createRemoteUserMedia(
       ),
     }),
     local: false,
+    callControlTarget,
     speaking$: scope.behavior(
       pretendToBeDisconnected$.pipe(
         switchMap((disconnected) =>

@@ -9,6 +9,7 @@ Please see LICENSE in the repository root for full details.
 import { type MatrixEvent } from "matrix-js-sdk/lib/models/event";
 
 import { ElementCallReactionEventType } from "../reactions/events";
+import { CALL_CONTROL_KEY } from "./CallModeration";
 
 /** Legacy standalone event type, also the namespace of the termination payload. */
 export const ElementCallTerminateEventType = "io.element.call.terminate";
@@ -65,6 +66,13 @@ export function isCallTerminationEvent(event: MatrixEvent): boolean {
     event.getType() === ElementCallTerminateEventType ||
     (event.getType() === CallTerminationEventType &&
       event.getContent()[ElementCallTerminateEventType] !== undefined)
+  );
+}
+
+export function isCallModerationEvent(event: MatrixEvent): boolean {
+  return (
+    event.getType() === CallTerminationEventType &&
+    event.getContent()[CALL_CONTROL_KEY] !== undefined
   );
 }
 
